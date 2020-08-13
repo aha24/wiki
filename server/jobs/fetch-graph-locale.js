@@ -1,17 +1,12 @@
-require('../core/worker')
 const _ = require('lodash')
 const { createApolloFetch } = require('apollo-fetch')
 
 /* global WIKI */
 
-WIKI.redis = require('../core/redis').init()
-WIKI.db = require('../core/db').init()
-
-module.exports = async (job) => {
-  WIKI.logger.info(`Fetching locale ${job.data.locale} from Graph endpoint...`)
+module.exports = async (localeCode) => {
+  WIKI.logger.info(`Fetching locale ${localeCode} from Graph endpoint...`)
 
   try {
-    await WIKI.configSvc.loadFromDb()
     const apollo = createApolloFetch({
       uri: WIKI.config.graphEndpoint
     })
@@ -26,34 +21,46 @@ module.exports = async (job) => {
         }
       }`,
       variables: {
-        code: job.data.locale
+        code: localeCode
       }
     })
     const strings = _.get(respStrings, 'data.localization.strings', [])
     let lcObj = {}
     _.forEach(strings, row => {
       if (_.includes(row.key, '::')) { return }
+      if (_.isEmpty(row.value)) {
+        row.value = row.key
+      }
       _.set(lcObj, row.key.replace(':', '.'), row.value)
     })
 
-    const locales = await WIKI.redis.get('locales')
+    const locales = await WIKI.cache.get('locales')
     if (locales) {
-      const currentLocale = _.find(JSON.parse(locales), ['code', job.data.locale]) || {}
-      await WIKI.db.locales.query().delete().where('code', job.data.locale)
-      await WIKI.db.locales.query().insert({
-        code: job.data.locale,
-        strings: lcObj,
-        isRTL: currentLocale.isRTL,
-        name: currentLocale.name,
-        nativeName: currentLocale.nativeName
-      })
+      const currentLocale = _.find(locales, ['code', localeCode]) || {}
+      const existingLocale = await WIKI.models.locales.query().where('code', localeCode).first()
+      if (existingLocale) {
+        await WIKI.models.locales.query().patch({
+          strings: lcObj
+        }).where('code', localeCode)
+      } else {
+        await WIKI.models.locales.query().insert({
+          code: localeCode,
+          strings: lcObj,
+          isRTL: currentLocale.isRTL,
+          name: currentLocale.name,
+          nativeName: currentLocale.nativeName,
+          availability: currentLocale.availability
+        })
+      }
     } else {
       throw new Error('Failed to fetch cached locales list! Restart server to resolve this issue.')
     }
 
-    WIKI.logger.info(`Fetching locale ${job.data.locale} from Graph endpoint: [ COMPLETED ]`)
+    await WIKI.lang.refreshNamespaces()
+
+    WIKI.logger.info(`Fetching locale ${localeCode} from Graph endpoint: [ COMPLETED ]`)
   } catch (err) {
-    WIKI.logger.error(`Fetching locale ${job.data.locale} from Graph endpoint: [ FAILED ]`)
+    WIKI.logger.error(`Fetching locale ${localeCode} from Graph endpoint: [ FAILED ]`)
     WIKI.logger.error(err.message)
   }
 }

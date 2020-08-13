@@ -1,268 +1,269 @@
 <template lang='pug'>
   .editor-code
-    v-toolbar.editor-code-toolbar.px-3(dense, color='primary', dark)
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Bold
-          use(xlink:href='#fa-bold')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Italic
-          use(xlink:href='#fa-italic')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Strikethrough
-          use(xlink:href='#fa-strikethrough')
-      v-menu(offset-y, open-on-hover)
-        v-btn(icon, slot='activator').mx-0
-          svg.icons.is-18(role='img')
-            title Heading
-            use(xlink:href='#fa-heading')
-        v-list
-          v-list-tile(v-for='(n, idx) in 6', @click='', :key='idx')
-            v-list-tile-action
-              svg.icons.is-18(role='img')
-                title Heading {{n}}
-                use(xlink:href='#fa-heading')
-            v-list-tile-title Heading {{n}}
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Blockquote
-          use(xlink:href='#fa-quote-left')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Unordered List
-          use(xlink:href='#fa-list-ul')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Ordered List
-          use(xlink:href='#fa-list-ol')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Link
-          use(xlink:href='#fa-link')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Inline Code
-          use(xlink:href='#fa-terminal')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Code Block
-          use(xlink:href='#fa-code')
-      v-btn(icon).mx-0
-        svg.icons.is-18(role='img')
-          title Horizontal Bar
-          use(xlink:href='#fa-minus')
-
     .editor-code-main
+      .editor-code-sidebar
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.animated.fadeInLeft(icon, tile, v-on='on', dark, disabled).mx-0
+              v-icon mdi-link-plus
+          span {{$t('editor:markup.insertLink')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p1s(icon, tile, v-on='on', dark, @click='toggleModal(`editorModalMedia`)').mx-0
+              v-icon(:color='activeModal === `editorModalMedia` ? `teal` : ``') mdi-folder-multiple-image
+          span {{$t('editor:markup.insertAssets')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p2s(icon, tile, v-on='on', dark, @click='toggleModal(`editorModalBlocks`)', disabled).mx-0
+              v-icon(:color='activeModal === `editorModalBlocks` ? `teal` : ``') mdi-view-dashboard-outline
+          span {{$t('editor:markup.insertBlock')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p3s(icon, tile, v-on='on', dark, disabled).mx-0
+              v-icon mdi-code-braces
+          span {{$t('editor:markup.insertCodeBlock')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p4s(icon, tile, v-on='on', dark, disabled).mx-0
+              v-icon mdi-library-video
+          span {{$t('editor:markup.insertVideoAudio')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p5s(icon, tile, v-on='on', dark, disabled).mx-0
+              v-icon mdi-chart-multiline
+          span {{$t('editor:markup.insertDiagram')}}
+        v-tooltip(right, color='teal')
+          template(v-slot:activator='{ on }')
+            v-btn.mt-3.animated.fadeInLeft.wait-p6s(icon, tile, v-on='on', dark, disabled).mx-0
+              v-icon mdi-function-variant
+          span {{$t('editor:markup.insertMathExpression')}}
+        template(v-if='$vuetify.breakpoint.mdAndUp')
+          v-spacer
+          v-tooltip(right, color='teal')
+            template(v-slot:activator='{ on }')
+              v-btn.mt-3.animated.fadeInLeft.wait-p8s(icon, tile, v-on='on', dark, @click='toggleFullscreen').mx-0
+                v-icon mdi-arrow-expand-all
+            span {{$t('editor:markup.distractionFreeMode')}}
       .editor-code-editor
-        .editor-code-editor-title(v-if='previewShown', @click='previewShown = false') Editor
-        .editor-code-editor-title(v-else='previewShown', @click='previewShown = true'): v-icon(dark) drag_indicator
-        codemirror(ref='cm', v-model='code', :options='cmOptions', @ready='onCmReady', @input='onCmInput')
-      transition(name='editor-code-preview')
-        .editor-code-preview(v-if='previewShown')
-          .editor-code-preview-title(@click='previewShown = false') Preview
-          .editor-code-preview-content.markdown-content(ref='editorPreview', v-html='previewHTML')
-
-      v-speed-dial(v-model='fabInsertMenu', :open-on-hover='true', direction='top', transition='slide-y-reverse-transition', fixed, left, bottom)
-        v-btn(color='blue', fab, dark, v-model='fabInsertMenu', slot='activator')
-          v-icon add_circle
-          v-icon close
-        v-btn(color='teal', fab, dark): v-icon image
-        v-btn(color='pink', fab, dark): v-icon insert_drive_file
-        v-btn(color='red', fab, dark): v-icon play_circle_outline
-        v-btn(color='purple', fab, dark): v-icon multiline_chart
-        v-btn(color='indigo', fab, dark): v-icon functions
+        textarea(ref='cm')
+    v-system-bar.editor-code-sysbar(dark, status, color='grey darken-3')
+      .caption.editor-code-sysbar-locale {{locale.toUpperCase()}}
+      .caption.px-3 /{{path}}
+      template(v-if='$vuetify.breakpoint.mdAndUp')
+        v-spacer
+        .caption Code
+        v-spacer
+        .caption Ln {{cursorPos.line + 1}}, Col {{cursorPos.ch + 1}}
 </template>
 
 <script>
 import _ from 'lodash'
+import { get, sync } from 'vuex-pathify'
 
 // ========================================
 // IMPORTS
 // ========================================
 
 // Code Mirror
-import { codemirror } from 'vue-codemirror'
+import CodeMirror from 'codemirror'
 import 'codemirror/lib/codemirror.css'
 
 // Language
-import 'codemirror/mode/markdown/markdown.js'
+import 'codemirror/mode/htmlmixed/htmlmixed.js'
 
 // Addons
 import 'codemirror/addon/selection/active-line.js'
 import 'codemirror/addon/display/fullscreen.js'
 import 'codemirror/addon/display/fullscreen.css'
 import 'codemirror/addon/selection/mark-selection.js'
-import 'codemirror/addon/scroll/annotatescrollbar.js'
-import 'codemirror/addon/search/matchesonscrollbar.js'
 import 'codemirror/addon/search/searchcursor.js'
-import 'codemirror/addon/search/match-highlighter.js'
-
-// Markdown-it
-import MarkdownIt from 'markdown-it'
-import mdEmoji from 'markdown-it-emoji'
-import mdTaskLists from 'markdown-it-task-lists'
-import mdExpandTabs from 'markdown-it-expand-tabs'
-import mdAbbr from 'markdown-it-abbr'
-import mdSup from 'markdown-it-sup'
-import mdSub from 'markdown-it-sub'
-import mdMark from 'markdown-it-mark'
-import mdImsize from 'markdown-it-imsize'
-
-// Prism (Syntax Highlighting)
-import Prism from '@/libs/prism/prism.js'
 
 // ========================================
 // INIT
 // ========================================
 
 // Platform detection
-const CtrlKey = /Mac/.test(navigator.platform) ? 'Cmd' : 'Ctrl'
-
-// Markdown Instance
-const md = new MarkdownIt({
-  html: true,
-  breaks: true,
-  linkify: true,
-  typography: true,
-  highlight(str, lang) {
-    return `<pre class="line-numbers"><code class="language-${lang}">${str}</code></pre>`
-  }
-})
-  .use(mdEmoji)
-  .use(mdTaskLists)
-  .use(mdExpandTabs)
-  .use(mdAbbr)
-  .use(mdSup)
-  .use(mdSub)
-  .use(mdMark)
-  .use(mdImsize)
-
-// ========================================
-// HELPER FUNCTIONS
-// ========================================
-
-// Inject line numbers for preview scroll sync
-let linesMap = []
-function injectLineNumbers (tokens, idx, options, env, slf) {
-  let line
-  if (tokens[idx].map && tokens[idx].level === 0) {
-    line = tokens[idx].map[0]
-    tokens[idx].attrJoin('class', 'line')
-    tokens[idx].attrSet('data-line', String(line))
-    linesMap.push(line)
-  }
-  return slf.renderToken(tokens, idx, options, env, slf)
-}
-md.renderer.rules.paragraph_open = injectLineNumbers
-md.renderer.rules.heading_open = injectLineNumbers
+// const CtrlKey = /Mac/.test(navigator.platform) ? 'Cmd' : 'Ctrl'
 
 // ========================================
 // Vue Component
 // ========================================
 
 export default {
-  components: {
-    codemirror
-  },
   data() {
     return {
-      fabInsertMenu: false,
-      code: '# Header 1\n\nSample **Text**\nhttp://wiki.js.org\n:rocket: :) :( :| :P\n\n## Header 2\nSample Text\n\n```javascript\nvar test = require("test");\n\n// some comment\nconst foo = bar(\'param\') + 1.234;\n```\n\n### Header 3\nLorem *ipsum* ~~text~~',
-      cmOptions: {
-        tabSize: 2,
-        mode: 'text/markdown',
-        theme: 'wikijs-dark',
-        lineNumbers: true,
-        lineWrapping: true,
-        line: true,
-        styleActiveLine: true,
-        highlightSelectionMatches: {
-          annotateScrollbar: true
-        },
-        viewportMargin: 50
-      },
-      previewShown: true,
-      previewHTML: ''
+      cm: null,
+      cursorPos: { ch: 0, line: 1 }
     }
   },
   computed: {
-    cm() {
-      return this.$refs.cm.codemirror
-    },
     isMobile() {
       return this.$vuetify.breakpoint.smAndDown
-    }
+    },
+    locale: get('page/locale'),
+    path: get('page/path'),
+    mode: get('editor/mode'),
+    activeModal: sync('editor/activeModal')
   },
   methods: {
-    onCmReady(cm) {
-      let self = this
-      const keyBindings = {
-        'F11' (cm) {
-          cm.setOption('fullScreen', !cm.getOption('fullScreen'))
-        },
-        'Esc' (cm) {
-          if (cm.getOption('fullScreen')) cm.setOption('fullScreen', false)
-        }
-      }
-      _.set(keyBindings, `${CtrlKey}-S`, cm => {
-        self.$parent.save()
-      })
-
-      cm.setSize(null, 'calc(100vh - 100px)')
-      cm.setOption('extraKeys', keyBindings)
-      cm.on('cursorActivity', cm => {
-        this.toolbarSync(cm)
-        this.scrollSync(cm)
-      })
-      this.onCmInput(this.code)
+    toggleModal(key) {
+      this.activeModal = (this.activeModal === key) ? '' : key
+      this.helpShown = false
     },
-    onCmInput: _.debounce(function (newContent) {
-      linesMap = []
-      this.previewHTML = md.render(newContent)
-      this.$nextTick(() => {
-        Prism.highlightAllUnder(this.$refs.editorPreview)
-        this.scrollSync(this.cm)
-      })
-    }, 500),
-    /**
-     * Update toolbar state
-     */
-    toolbarSync(cm) {
-      const pos = cm.getCursor('start')
-      const token = cm.getTokenAt(pos)
-
-      if (!token.type) { return }
-
-      console.info(token)
+    closeAllModal() {
+      this.activeModal = ''
+      this.helpShown = false
     },
     /**
-     * Update scroll sync
+     * Insert content at cursor
      */
-    scrollSync: _.debounce(function (cm) {
-      if (!this.previewShown || cm.somethingSelected()) { return }
-      let currentLine = cm.getCursor().line
-      if (currentLine < 3) {
-        this.Velocity(this.$refs.editorPreview, 'stop', true)
-        this.Velocity(this.$refs.editorPreview.firstChild, 'scroll', { offset: '-50', duration: 1000, container: this.$refs.editorPreview })
+    insertAtCursor({ content }) {
+      const cursor = this.cm.doc.getCursor('head')
+      this.cm.doc.replaceRange(content, cursor)
+    },
+    /**
+     * Insert content after current line
+     */
+    insertAfter({ content, newLine }) {
+      const curLine = this.cm.doc.getCursor('to').line
+      const lineLength = this.cm.doc.getLine(curLine).length
+      this.cm.doc.replaceRange(newLine ? `\n${content}\n` : content, { line: curLine, ch: lineLength + 1 })
+    },
+    /**
+     * Insert content before current line
+     */
+    insertBeforeEachLine({ content, after }) {
+      let lines = []
+      if (!this.cm.doc.somethingSelected()) {
+        lines.push(this.cm.doc.getCursor('head').line)
       } else {
-        let closestLine = _.findLast(linesMap, n => n <= currentLine)
-        let destElm = this.$refs.editorPreview.querySelector(`[data-line='${closestLine}']`)
-        if (destElm) {
-          this.Velocity(this.$refs.editorPreview, 'stop', true)
-          this.Velocity(destElm, 'scroll', { offset: '-100', duration: 1000, container: this.$refs.editorPreview })
-        }
+        lines = _.flatten(this.cm.doc.listSelections().map(sl => {
+          const range = Math.abs(sl.anchor.line - sl.head.line) + 1
+          const lowestLine = (sl.anchor.line > sl.head.line) ? sl.head.line : sl.anchor.line
+          return _.times(range, l => l + lowestLine)
+        }))
       }
-    }, 500),
-    toggleAround (before, after) {
+      lines.forEach(ln => {
+        let lineContent = this.cm.doc.getLine(ln)
+        const lineLength = lineContent.length
+        if (_.startsWith(lineContent, content)) {
+          lineContent = lineContent.substring(content.length)
+        }
 
+        this.cm.doc.replaceRange(content + lineContent, { line: ln, ch: 0 }, { line: ln, ch: lineLength })
+      })
+      if (after) {
+        const lastLine = _.last(lines)
+        this.cm.doc.replaceRange(`\n${after}\n`, { line: lastLine, ch: this.cm.doc.getLine(lastLine).length + 1 })
+      }
+    },
+    /**
+     * Update cursor state
+     */
+    positionSync(cm) {
+      this.cursorPos = cm.getCursor('head')
+    },
+    toggleFullscreen () {
+      this.cm.setOption('fullScreen', true)
+    },
+    refresh() {
+      this.$nextTick(() => {
+        this.cm.refresh()
+      })
     }
+  },
+  mounted() {
+    this.$store.set('editor/editorKey', 'code')
+
+    if (this.mode === 'create') {
+      this.$store.set('editor/content', '<h1>Title</h1>\n\n<p>Some text here</p>')
+    }
+
+    // Initialize CodeMirror
+
+    this.cm = CodeMirror.fromTextArea(this.$refs.cm, {
+      tabSize: 2,
+      mode: 'text/html',
+      theme: 'wikijs-dark',
+      lineNumbers: true,
+      lineWrapping: true,
+      line: true,
+      styleActiveLine: true,
+      highlightSelectionMatches: {
+        annotateScrollbar: true
+      },
+      viewportMargin: 50,
+      inputStyle: 'contenteditable',
+      allowDropFileTypes: ['image/jpg', 'image/png', 'image/svg', 'image/jpeg', 'image/gif']
+    })
+    this.cm.setValue(this.$store.get('editor/content'))
+    this.cm.on('change', c => {
+      this.$store.set('editor/content', c.getValue())
+    })
+    if (this.$vuetify.breakpoint.mdAndUp) {
+      this.cm.setSize(null, 'calc(100vh - 64px - 24px)')
+    } else {
+      this.cm.setSize(null, 'calc(100vh - 56px - 16px)')
+    }
+
+    // Set Keybindings
+
+    const keyBindings = {
+      'F11' (c) {
+        c.setOption('fullScreen', !c.getOption('fullScreen'))
+      },
+      'Esc' (c) {
+        if (c.getOption('fullScreen')) c.setOption('fullScreen', false)
+      }
+    }
+    this.cm.setOption('extraKeys', keyBindings)
+
+    // Handle cursor movement
+
+    this.cm.on('cursorActivity', c => {
+      this.positionSync(c)
+    })
+
+    // Render initial preview
+
+    this.$root.$on('editorInsert', opts => {
+      switch (opts.kind) {
+        case 'IMAGE':
+          let img = `<img src="${opts.path}" alt="${opts.text}"`
+          if (opts.align && opts.align !== '') {
+            img += ` class="align-${opts.align}"`
+          }
+          img += ` />`
+          this.insertAtCursor({
+            content: img
+          })
+          break
+        case 'BINARY':
+          this.insertAtCursor({
+            content: `<a href="${opts.path}" title="${opts.text}">${opts.text}</a>`
+          })
+          break
+      }
+    })
+
+    // Handle save conflict
+    this.$root.$on('saveConflict', () => {
+      this.toggleModal(`editorModalConflict`)
+    })
+    this.$root.$on('overwriteEditorContent', () => {
+      this.cm.setValue(this.$store.get('editor/content'))
+    })
+  },
+  beforeDestroy() {
+    this.$root.$off('editorInsert')
   }
 }
 </script>
 
 <style lang='scss'>
+$editor-height: calc(100vh - 64px - 24px);
+$editor-height-mobile: calc(100vh - 56px - 16px);
+
 .editor-code {
   &-main {
     display: flex;
@@ -273,7 +274,7 @@ export default {
     background-color: darken(mc('grey', '900'), 4.5%);
     flex: 1 1 50%;
     display: block;
-    height: calc(100vh - 96px);
+    height: $editor-height;
     position: relative;
 
     &-title {
@@ -299,84 +300,33 @@ export default {
     }
   }
 
-  &-preview {
-    flex: 1 1 50%;
-    background-color: mc('grey', '100');
-    position: relative;
-    height: calc(100vh - 100px);
-    overflow: hidden;
+  &-sidebar {
+    background-color: mc('grey', '900');
+    width: 64px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 24px 0;
 
     @include until($tablet) {
-      display: none;
+      padding: 12px 0;
+      width: 40px;
     }
+  }
 
-    &-enter-active, &-leave-active {
-      transition: max-width .5s ease;
-      max-width: 50vw;
+  &-sysbar {
+    padding-left: 0;
 
-      .editor-code-preview-content {
-        width: 50vw;
-        overflow:hidden;
-      }
-    }
-    &-enter, &-leave-to {
-      max-width: 0;
-    }
-
-    &-content {
-      height: calc(100vh - 100px);
-      overflow-y: scroll;
-      padding: 30px 1rem 1rem 1rem;
-      width: calc(100% + 1rem + 17px)
-      // -ms-overflow-style: none;
-
-      // &::-webkit-scrollbar {
-      //   width: 0px;
-      //   background: transparent;
-      // }
-    }
-
-    &-title {
-      background-color: rgba(mc('blue', '100'), .75);
-      border-bottom-right-radius: 5px;
-      display: inline-flex;
-      height: 30px;
+    &-locale {
+      background-color: rgba(255,255,255,.25);
+      display:inline-flex;
+      padding: 0 12px;
+      height: 24px;
+      width: 63px;
       justify-content: center;
       align-items: center;
-      padding: 0 1rem;
-      color: mc('blue', '800');
-      position: absolute;
-      top: 0;
-      left: 0;
-      z-index: 2;
-      text-transform: uppercase;
-      font-size: .7rem;
-      cursor: pointer;
     }
-  }
-
-  &-toolbar {
-    background-color: mc('blue', '700');
-    background-image: linear-gradient(to bottom, mc('blue', '700') 0%, mc('blue','800') 100%);
-    color: #FFF;
-
-    @include until($tablet) {
-      justify-content: center;
-    }
-
-    svg {
-      use {
-        color: #FFF;
-      }
-    }
-  }
-
-  // ==========================================
-  // Fix FAB revealing under codemirror
-  // ==========================================
-
-  .speed-dial--fixed {
-    z-index: 8;
   }
 
   // ==========================================
@@ -429,10 +379,10 @@ export default {
     background: mc('blue','800');
   }
   .cm-s-wikijs-dark .CodeMirror-line::selection, .cm-s-wikijs-dark .CodeMirror-line > span::selection, .cm-s-wikijs-dark .CodeMirror-line > span > span::selection {
-    background: mc('red', '500');
+    background: mc('amber', '500');
   }
   .cm-s-wikijs-dark .CodeMirror-line::-moz-selection, .cm-s-wikijs-dark .CodeMirror-line > span::-moz-selection, .cm-s-wikijs-dark .CodeMirror-line > span > span::-moz-selection {
-    background: mc('red', '500');
+    background: mc('amber', '500');
   }
   .cm-s-wikijs-dark .CodeMirror-gutters {
     background: darken(mc('grey','900'), 6%);

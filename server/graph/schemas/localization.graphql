@@ -17,6 +17,7 @@ extend type Mutation {
 type LocalizationQuery {
   locales: [LocalizationLocale]
   config: LocalizationConfig
+  translations(locale: String!, namespace: String!): [Translation]
 }
 
 # -----------------------------------------------
@@ -26,14 +27,14 @@ type LocalizationQuery {
 type LocalizationMutation {
   downloadLocale(
     locale: String!
-  ): DefaultResponse
+  ): DefaultResponse @auth(requires: ["manage:system"])
 
   updateLocale(
     locale: String!
     autoUpdate: Boolean!
     namespacing: Boolean!
     namespaces: [String]!
-  ): DefaultResponse
+  ): DefaultResponse @auth(requires: ["manage:system"])
 }
 
 # -----------------------------------------------
@@ -41,6 +42,7 @@ type LocalizationMutation {
 # -----------------------------------------------
 
 type LocalizationLocale {
+  availability: Int!
   code: String!
   createdAt: Date!
   installDate: Date
@@ -56,4 +58,9 @@ type LocalizationConfig {
   autoUpdate: Boolean!
   namespacing: Boolean!
   namespaces: [String]!
+}
+
+type Translation {
+  key: String!
+  value: String!
 }

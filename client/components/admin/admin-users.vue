@@ -1,129 +1,183 @@
 <template lang='pug'>
-  v-card(flat)
-    v-card(flat, tile, :color='$vuetify.dark ? "grey darken-4" : "grey lighten-5"').pa-3.pt-4
-      .headline.blue--text.text--darken-2 Users
-      .subheading.grey--text Manage users
-    v-card
-      v-card-title
-        v-btn(color='primary', dark)
-          v-icon(left) add
-          | New User
-        v-btn(color='primary', dark)
-          v-icon(left) lock_outline
-          | Authorize User
-        v-btn(icon)
-          v-icon.grey--text refresh
-        v-spacer
-        v-text-field(append-icon='search', label='Search', single-line, hide-details, v-model='search')
-      v-data-table(
-        v-model='selected'
-        :items='items',
-        :headers='headers',
-        :search='search',
-        :pagination.sync='pagination',
-        :rows-per-page-items='[15]'
-        select-all,
-        hide-actions,
-        disable-initial-sort
-      )
-        template(slot='headers', slot-scope='props')
-          tr
-            th(width='50')
-            th.text-xs-right(
-              width='80'
-              :class='[`column sortable`, pagination.descending ? `desc` : `asc`, pagination.sortBy === `id` ? `active` : ``]'
-              @click='changeSort(`id`)'
+  v-container(fluid, grid-list-lg)
+    v-layout(row, wrap)
+      v-flex(xs12)
+        .admin-header
+          img.animated.fadeInUp(src='/_assets/svg/icon-customer.svg', alt='Users', style='width: 80px;')
+          .admin-header-title
+            .headline.blue--text.text--darken-2.animated.fadeInLeft Users
+            .subtitle-1.grey--text.animated.fadeInLeft.wait-p2s Manage users
+          v-spacer
+          v-btn.animated.fadeInDown.wait-p2s.mr-3(outlined, color='grey', icon, @click='refresh')
+            v-icon mdi-refresh
+          v-btn.animated.fadeInDown(color='primary', large, depressed, @click='createUser')
+            v-icon(left) mdi-plus
+            span New User
+        v-card.mt-3.animated.fadeInUp
+          .pa-2.d-flex.align-center(:class='$vuetify.theme.dark ? `grey darken-3-d5` : `grey lighten-3`')
+            v-text-field(
+              solo
+              flat
+              v-model='search'
+              prepend-inner-icon='mdi-account-search-outline'
+              label='Search Users...'
+              hide-details
+              style='max-width: 400px;'
+              dense
+              )
+            v-spacer
+            v-select(
+              solo
+              flat
+              hide-details
+              label='Identity Provider'
+              :items='strategies'
+              v-model='filterStrategy'
+              item-text='displayName'
+              item-value='key'
+              style='max-width: 300px;'
+              dense
             )
-              v-icon(small) arrow_upward
-              | ID
-            th.text-xs-left(
-              v-for='header in props.headers'
-              :key='header.text'
-              :width='header.width'
-              :class='[`column sortable`, pagination.descending ? `desc` : `asc`, header.value === pagination.sortBy ? `active` : ``]'
-              @click='changeSort(header.value)'
+          v-divider
+          v-data-table(
+            v-model='selected'
+            :items='usersFiltered',
+            :headers='headers',
+            :search='search',
+            :page.sync='pagination'
+            :items-per-page='15'
+            :loading='loading'
+            @page-count='pageCount = $event'
+            hide-default-footer
             )
-              | {{ header.text }}
-              v-icon(small) arrow_upward
-        template(slot='items', slot-scope='props')
-          tr(:active='props.selected')
-            td
-              v-checkbox(hide-details, :input-value='props.selected', color='blue darken-2', @click='props.selected = !props.selected')
-            td.text-xs-right {{ props.item.id }}
-            td {{ props.item.email }}
-            td {{ props.item.name }}
-            td {{ props.item.provider }}
-            td {{ props.item.createdOn }}
-            td {{ props.item.updatedOn }}
-            td: v-btn(icon): v-icon.grey--text.text--darken-1 more_horiz
-        template(slot='no-data')
-          v-alert(icon='warning', :value='true') No users to display!
-      .text-xs-center.py-2
-        v-pagination(v-model='pagination.page', :length='pages')
+            template(slot='item', slot-scope='props')
+              tr.is-clickable(:active='props.selected', @click='$router.push("/users/" + props.item.id)')
+                //- td
+                  v-checkbox(hide-details, :input-value='props.selected', color='blue darken-2', @click='props.selected = !props.selected')
+                td {{ props.item.id }}
+                td: strong {{ props.item.name }}
+                td {{ props.item.email }}
+                td {{ props.item.providerKey }}
+                td {{ props.item.createdAt | moment('from') }}
+                td
+                  span(v-if='props.item.lastLoginAt') {{ props.item.lastLoginAt | moment('from') }}
+                  em.grey--text(v-else) Never
+                td.text-right
+                  v-icon.mr-3(v-if='props.item.isSystem') mdi-lock-outline
+                  status-indicator(positive, pulse, v-if='props.item.isActive')
+                  status-indicator(negative, pulse, v-else)
+            template(slot='no-data')
+              .pa-3
+                v-alert.text-left(icon='mdi-alert', outlined, color='grey')
+                  em.body-2 No users to display!
+          v-card-chin(v-if='pageCount > 1')
+            v-spacer
+            v-pagination(v-model='pagination', :length='pageCount')
+            v-spacer
+
+    user-create(v-model='isCreateDialogShown', @refresh='refresh(false)')
 </template>
 
 <script>
+import _ from 'lodash'
+import gql from 'graphql-tag'
+
+import { StatusIndicator } from 'vue-status-indicator'
+import UserCreate from './admin-users-create.vue'
+
 export default {
+  components: {
+    StatusIndicator,
+    UserCreate
+  },
   data() {
     return {
       selected: [],
-      pagination: {},
-      items: [
-        { id: 1, email: 'user@test.com', name: 'John Doe', provider: 'local' },
-        { id: 2, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 3, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 4, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 5, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 6, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 7, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 8, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 9, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 10, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 11, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 12, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 13, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 14, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 15, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 16, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 17, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 18, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 19, email: 'dude@test.com', name: 'John Doe', provider: 'local' },
-        { id: 20, email: 'dude@test.com', name: 'John Doe', provider: 'local' }
-      ],
+      pagination: 1,
+      pageCount: 0,
+      users: [],
       headers: [
-        { text: 'Email', value: 'email' },
-        { text: 'Name', value: 'name' },
-        { text: 'Provider', value: 'provider' },
-        { text: 'Created On', value: 'createdOn' },
-        { text: 'Updated On', value: 'updatedOn' },
-        { text: '', value: 'actions', sortable: false, width: 50 }
+        { text: 'ID', value: 'id', width: 80, sortable: true },
+        { text: 'Name', value: 'name', sortable: true },
+        { text: 'Email', value: 'email', sortable: true },
+        { text: 'Provider', value: 'provider', sortable: true },
+        { text: 'Created', value: 'createdAt', sortable: true },
+        { text: 'Last Login', value: 'lastLoginAt', sortable: true },
+        { text: '', value: 'actions', sortable: false, width: 80 }
       ],
-      search: ''
+      strategies: [],
+      filterStrategy: 'all',
+      search: '',
+      loading: false,
+      isCreateDialogShown: false
     }
   },
   computed: {
-    pages () {
-      if (this.pagination.rowsPerPage == null || this.pagination.totalItems == null) {
-        return 0
-      }
-
-      return Math.ceil(this.pagination.totalItems / this.pagination.rowsPerPage)
+    usersFiltered () {
+      const all = this.filterStrategy === 'all' || this.filterStrategy === ''
+      return _.filter(this.users, u => all || u.providerKey === this.filterStrategy)
     }
   },
   methods: {
-    changeSort (column) {
-      if (this.pagination.sortBy === column) {
-        this.pagination.descending = !this.pagination.descending
-      } else {
-        this.pagination.sortBy = column
-        this.pagination.descending = false
+    createUser() {
+      this.isCreateDialogShown = true
+    },
+    async refresh(notify = true) {
+      await this.$apollo.queries.users.refetch()
+      if (notify) {
+        this.$store.commit('showNotification', {
+          message: 'Users list has been refreshed.',
+          style: 'success',
+          icon: 'cached'
+        })
+      }
+    }
+  },
+  apollo: {
+    users: {
+      query: gql`
+        query {
+          users {
+            list {
+              id
+              name
+              email
+              providerKey
+              isSystem
+              isActive
+              createdAt
+              lastLoginAt
+            }
+          }
+        }
+      `,
+      fetchPolicy: 'network-only',
+      update: (data) => data.users.list,
+      watchLoading (isLoading) {
+        this.loading = isLoading
+        this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-users-refresh')
       }
     },
-    toggleAll () {
-      if (this.selected.length) {
-        this.selected = []
-      } else {
-        this.selected = this.items.slice()
+    strategies: {
+      query: gql`
+        query {
+          authentication {
+            activeStrategies {
+              key
+              displayName
+            }
+          }
+        }
+      `,
+      fetchPolicy: 'network-only',
+      update: (data) => {
+        return _.concat({
+          key: 'all',
+          displayName: 'All Providers'
+        }, data.authentication.activeStrategies)
+      },
+      watchLoading (isLoading) {
+        this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-users-strategies-refresh')
       }
     }
   }

@@ -1,108 +1,283 @@
 <template lang="pug">
   v-app
-    nav-header
-    .login
-      .login-container(:class='{ "is-expanded": strategies.length > 1, "is-loading": isLoading }')
-        .login-mascot
-          img(src='/svg/henry-reading.svg', alt='Henry')
-        .login-providers(v-show='strategies.length > 1')
-          button(v-for='strategy in strategies', :class='{ "is-active": strategy.key === selectedStrategy }', @click='selectStrategy(strategy.key, strategy.useForm)', :title='strategy.title')
-            em(v-html='strategy.icon')
-            span {{ strategy.title }}
-          .login-providers-fill
-        .login-frame(v-show='screen === "login"')
-          h1.text-xs-center.display-1 {{ siteTitle }}
-          h2.text-xs-center.subheading {{ $t('auth:loginRequired') }}
-          v-text-field(solo, ref='iptEmail', v-model='username', :placeholder='$t("auth:fields.emailUser")')
-          v-text-field.mt-2(
-            solo,
-            ref='iptPassword',
-            v-model='password',
-            :append-icon='hidePassword ? "visibility" : "visibility_off"',
-            :append-icon-cb='() => (hidePassword = !hidePassword)',
-            :type='hidePassword ? "password" : "text"',
-            :placeholder='$t("auth:fields.password")',
-            @keyup.enter='login'
-          )
-          v-btn.mt-3(block, large, color='primary', @click='login') {{ $t('auth:actions.login') }}
-        .login-frame(v-show='screen === "tfa"')
-          .login-frame-icon
-            svg.icons.is-48(role='img')
-              title {{ $t('auth:tfa.title') }}
-              use(xlink:href='#nc-key')
-          h2 {{ $t('auth:tfa.subtitle') }}
-          input(type='text', ref='iptTFA', v-model='securityCode', :placeholder='$t("auth:tfa.placeholder")', @keyup.enter='verifySecurityCode')
-          button.button.is-blue.is-fullwidth(@click='verifySecurityCode')
-            span {{ $t('auth:tfa.verifyToken') }}
-      .login-copyright
-        span {{ $t('common:footer.poweredBy') }}
-        a(href='https://wiki.js.org', rel='external', title='Wiki.js') Wiki.js
+    .login(:style='`background-image: url(` + bgUrl + `);`')
+      .login-sd
+        .d-flex
+          .login-logo
+            v-avatar(tile, size='34')
+              v-img(:src='logoUrl')
+          .login-title
+            .text-h6 {{ siteTitle }}
+        //-------------------------------------------------
+        //- PROVIDERS LIST
+        //-------------------------------------------------
+        template(v-if='screen === `login` && strategies.length > 1')
+          .login-subtitle.mt-5
+            .text-subtitle-1 Select Authentication Provider
+          .login-list
+            v-list.elevation-1.radius-7(nav)
+              v-list-item-group(v-model='selectedStrategyKey')
+                v-list-item(
+                  v-for='(stg, idx) of filteredStrategies'
+                  :key='stg.key'
+                  :value='stg.key'
+                  :color='stg.strategy.color'
+                  )
+                  v-avatar.mr-3(tile, size='24', v-html='stg.strategy.icon')
+                  span.text-none {{stg.displayName}}
+        //-------------------------------------------------
+        //- LOGIN FORM
+        //-------------------------------------------------
+        template(v-if='screen === `login` && selectedStrategy.strategy.useForm')
+          .login-subtitle
+            .text-subtitle-1 Enter your credentials
+          .login-form
+            v-text-field(
+              solo
+              flat
+              prepend-inner-icon='mdi-clipboard-account'
+              background-color='white'
+              hide-details
+              ref='iptEmail'
+              v-model='username'
+              :placeholder='isUsernameEmail ? $t(`auth:fields.email`) : $t(`auth:fields.username`)'
+              :type='isUsernameEmail ? `email` : `text`'
+              :autocomplete='isUsernameEmail ? `email` : `username`'
+              )
+            v-text-field.mt-2(
+              solo
+              flat
+              prepend-inner-icon='mdi-form-textbox-password'
+              background-color='white'
+              hide-details
+              ref='iptPassword'
+              v-model='password'
+              :append-icon='hidePassword ? "mdi-eye-off" : "mdi-eye"'
+              @click:append='() => (hidePassword = !hidePassword)'
+              :type='hidePassword ? "password" : "text"'
+              :placeholder='$t("auth:fields.password")'
+              autocomplete='current-password'
+              @keyup.enter='login'
+            )
+            v-btn.mt-2.text-none(
+              width='100%'
+              large
+              color='primary'
+              dark
+              @click='login'
+              :loading='isLoading'
+              ) {{ $t('auth:actions.login') }}
+            .text-center.mt-5
+              v-btn.text-none(
+                text
+                rounded
+                color='grey darken-3'
+                @click.stop.prevent='forgotPassword'
+                href='#forgot'
+                ): .caption {{ $t('auth:forgotPasswordLink') }}
+              v-btn.text-none(
+                v-if='selectedStrategyKey === `local` && selectedStrategy.selfRegistration'
+                color='indigo darken-2'
+                text
+                rounded
+                href='/register'
+                ): .caption {{ $t('auth:switchToRegister.link') }}
+        //-------------------------------------------------
+        //- FORGOT PASSWORD FORM
+        //-------------------------------------------------
+        template(v-if='screen === `forgot`')
+          .login-subtitle
+            .text-subtitle-1 Forgot your password
+          .login-info {{ $t('auth:forgotPasswordSubtitle') }}
+          .login-form
+            v-text-field(
+              solo
+              flat
+              prepend-inner-icon='mdi-clipboard-account'
+              background-color='white'
+              hide-details
+              ref='iptForgotPwdEmail'
+              v-model='username'
+              :placeholder='$t(`auth:fields.email`)'
+              type='email'
+              autocomplete='email'
+              )
+            v-btn.mt-2.text-none(
+              width='100%'
+              large
+              color='primary'
+              dark
+              @click='forgotPasswordSubmit'
+              :loading='isLoading'
+              ) {{ $t('auth:sendResetPassword') }}
+            .text-center.mt-5
+              v-btn.text-none(
+                text
+                rounded
+                color='grey darken-3'
+                @click.stop.prevent='screen = `login`'
+                href='#forgot'
+                ): .caption {{ $t('auth:forgotPasswordCancel') }}
+        //-------------------------------------------------
+        //- CHANGE PASSWORD FORM
+        //-------------------------------------------------
+        template(v-if='screen === `changePwd`')
+          .login-subtitle
+            .text-subtitle-1 {{ $t('auth:changePwd.subtitle') }}
+          .login-form
+            v-text-field.mt-2(
+              type='password'
+              solo
+              flat
+              prepend-inner-icon='mdi-form-textbox-password'
+              background-color='white'
+              hide-details
+              ref='iptNewPassword'
+              v-model='newPassword'
+              :placeholder='$t(`auth:changePwd.newPasswordPlaceholder`)'
+              autocomplete='new-password'
+              )
+              password-strength(slot='progress', v-model='newPassword')
+            v-text-field.mt-2(
+              type='password'
+              solo
+              flat
+              prepend-inner-icon='mdi-form-textbox-password'
+              background-color='white'
+              hide-details
+              v-model='newPasswordVerify'
+              :placeholder='$t(`auth:changePwd.newPasswordVerifyPlaceholder`)'
+              autocomplete='new-password'
+              @keyup.enter='changePassword'
+            )
+            v-btn.mt-2.text-none(
+              width='100%'
+              large
+              color='primary'
+              dark
+              @click='changePassword'
+              :loading='isLoading'
+              ) {{ $t('auth:changePwd.proceed') }}
 
-    v-snackbar(
-      :color='notification.style'
-      bottom,
-      right,
-      multi-line,
-      v-model='notificationState'
-    )
-      .text-xs-left
-        v-icon.mr-3(dark) {{ notification.icon }}
-        span {{ notification.message }}
+    //-------------------------------------------------
+    //- TFA FORM
+    //-------------------------------------------------
+    v-dialog(v-model='isTFAShown', max-width='500', persistent)
+      v-card
+        .login-tfa.text-center.pa-5
+          img(src='_assets/svg/icon-pin-pad.svg')
+          .subtitle-2 Enter the security code generated from your trusted device:
+          v-text-field.login-tfa-field.mt-2(
+            solo
+            flat
+            background-color='white'
+            hide-details
+            ref='iptTFA'
+            v-model='securityCode'
+            :placeholder='$t("auth:tfa.placeholder")'
+            autocomplete='one-time-code'
+            @keyup.enter='verifySecurityCode'
+          )
+          v-btn.mt-2.text-none(
+            width='100%'
+            large
+            color='primary'
+            dark
+            @click='verifySecurityCode'
+            :loading='isLoading'
+            ) {{ $t('auth:tfa.verifyToken') }}
+
+    loader(v-model='isLoading', :color='loaderColor', :title='loaderTitle', :subtitle='$t(`auth:pleaseWait`)')
+    notify
 </template>
 
 <script>
 /* global siteConfig */
 
-import _ from 'lodash'
-import { mapState } from 'vuex'
+// <span>Photo by <a href="https://unsplash.com/@isaacquesada?utm_source=unsplash&amp;utm_medium=referral&amp;utm_content=creditCopyText">Isaac Quesada</a> on <a href="/t/textures-patterns?utm_source=unsplash&amp;utm_medium=referral&amp;utm_content=creditCopyText">Unsplash</a></span>
 
-import strategiesQuery from 'gql/login/login-query-strategies.gql'
-import loginMutation from 'gql/login/login-mutation-login.gql'
-import tfaMutation from 'gql/login/login-mutation-tfa.gql'
+import _ from 'lodash'
+import Cookies from 'js-cookie'
+import gql from 'graphql-tag'
+import { sync } from 'vuex-pathify'
 
 export default {
   i18nOptions: { namespaces: 'auth' },
+  props: {
+    bgUrl: {
+      type: String,
+      default: ''
+    },
+    hideLocal: {
+      type: Boolean,
+      default: false
+    }
+  },
   data () {
     return {
       error: false,
       strategies: [],
-      selectedStrategy: 'local',
+      selectedStrategyKey: 'unselected',
+      selectedStrategy: { key: 'unselected', strategy: { useForm: false, usernameType: 'email' } },
       screen: 'login',
       username: '',
       password: '',
       hidePassword: true,
       securityCode: '',
-      loginToken: '',
-      isLoading: false
+      continuationToken: '',
+      isLoading: false,
+      loaderColor: 'grey darken-4',
+      loaderTitle: 'Working...',
+      isShown: false,
+      newPassword: '',
+      newPasswordVerify: '',
+      isTFAShown: false
     }
   },
   computed: {
-    ...mapState(['notification']),
-    notificationState: {
-      get() { return this.notification.isActive },
-      set(newState) { this.$store.commit('updateNotificationState', newState) }
-    },
+    activeModal: sync('editor/activeModal'),
     siteTitle () {
       return siteConfig.title
+    },
+    isSocialShown () {
+      return this.strategies.length > 1
+    },
+    logoUrl () { return siteConfig.logoUrl },
+    filteredStrategies () {
+      const qParams = new URLSearchParams(window.location.search)
+      if (this.hideLocal && !qParams.has('all')) {
+        return _.reject(this.strategies, ['key', 'local'])
+      } else {
+        return this.strategies
+      }
+    },
+    isUsernameEmail () {
+      return this.selectedStrategy.strategy.usernameType === `email`
+    }
+  },
+  watch: {
+    filteredStrategies (newValue, oldValue) {
+      if (_.head(newValue).strategy.useForm) {
+        this.selectedStrategyKey = _.head(newValue).key
+      }
+    },
+    selectedStrategyKey (newValue, oldValue) {
+      this.selectedStrategy = _.find(this.strategies, ['key', newValue])
+      this.screen = 'login'
+      if (!this.selectedStrategy.strategy.useForm) {
+        this.isLoading = true
+        window.location.assign('/login/' + newValue)
+      } else {
+        this.$nextTick(() => {
+          this.$refs.iptEmail.focus()
+        })
+      }
     }
   },
   mounted () {
-    this.$refs.iptEmail.focus()
+    this.isShown = true
   },
   methods: {
-    /**
-     * SELECT STRATEGY
-     */
-    selectStrategy (key, useForm) {
-      this.selectedStrategy = key
-      this.screen = 'login'
-      if (!useForm) {
-        this.isLoading = true
-        window.location.assign(this.$helpers.resolvePath('login/' + key))
-      } else {
-        this.$refs.iptEmail.focus()
-      }
-    },
     /**
      * LOGIN
      */
@@ -110,61 +285,93 @@ export default {
       if (this.username.length < 2) {
         this.$store.commit('showNotification', {
           style: 'red',
-          message: 'Enter a valid email / username.',
-          icon: 'warning'
+          message: this.$t('auth:invalidEmailUsername'),
+          icon: 'alert'
         })
         this.$refs.iptEmail.focus()
       } else if (this.password.length < 2) {
         this.$store.commit('showNotification', {
           style: 'red',
-          message: 'Enter a valid password.',
-          icon: 'warning'
+          message: this.$t('auth:invalidPassword'),
+          icon: 'alert'
         })
         this.$refs.iptPassword.focus()
       } else {
+        this.loaderColor = 'grey darken-4'
+        this.loaderTitle = this.$t('auth:signingIn')
         this.isLoading = true
         try {
           let resp = await this.$apollo.mutate({
-            mutation: loginMutation,
+            mutation: gql`
+              mutation($username: String!, $password: String!, $strategy: String!) {
+                authentication {
+                  login(username: $username, password: $password, strategy: $strategy) {
+                    responseResult {
+                      succeeded
+                      errorCode
+                      slug
+                      message
+                    }
+                    jwt
+                    mustChangePwd
+                    mustProvideTFA
+                    continuationToken
+                    redirect
+                  }
+                }
+              }
+            `,
             variables: {
               username: this.username,
               password: this.password,
-              strategy: this.selectedStrategy
+              strategy: this.selectedStrategy.key
             }
           })
           if (_.has(resp, 'data.authentication.login')) {
             let respObj = _.get(resp, 'data.authentication.login', {})
             if (respObj.responseResult.succeeded === true) {
-              if (respObj.tfaRequired === true) {
+              this.continuationToken = respObj.continuationToken
+              if (respObj.mustChangePwd === true) {
+                this.screen = 'changePwd'
+                this.$nextTick(() => {
+                  this.$refs.iptNewPassword.focus()
+                })
+                this.isLoading = false
+              } else if (respObj.mustProvideTFA === true) {
                 this.screen = 'tfa'
                 this.securityCode = ''
-                this.loginToken = respObj.tfaLoginToken
                 this.$nextTick(() => {
                   this.$refs.iptTFA.focus()
                 })
+                this.isLoading = false
               } else {
-                this.$store.commit('showNotification', {
-                  message: 'Login successful!',
-                  style: 'success',
-                  icon: 'check'
-                })
+                this.loaderColor = 'green darken-1'
+                this.loaderTitle = this.$t('auth:loginSuccess')
+                Cookies.set('jwt', respObj.jwt, { expires: 365 })
                 _.delay(() => {
-                  window.location.replace('/') // TEMPORARY - USE RETURNURL
+                  const loginRedirect = Cookies.get('loginRedirect')
+                  if (loginRedirect) {
+                    Cookies.remove('loginRedirect')
+                    window.location.replace(loginRedirect)
+                  } else if (respObj.redirect) {
+                    window.location.replace(respObj.redirect)
+                  } else {
+                    window.location.replace('/')
+                  }
                 }, 1000)
               }
-              this.isLoading = false
             } else {
               throw new Error(respObj.responseResult.message)
             }
           } else {
-            throw new Error('Authentication is unavailable.')
+            throw new Error(this.$t('auth:genericError'))
           }
         } catch (err) {
           console.error(err)
           this.$store.commit('showNotification', {
             style: 'red',
             message: err.message,
-            icon: 'warning'
+            icon: 'alert'
           })
           this.isLoading = false
         }
@@ -184,9 +391,17 @@ export default {
       } else {
         this.isLoading = true
         this.$apollo.mutate({
-          mutation: tfaMutation,
+          mutation: gql`
+            {
+              authentication {
+                activeStrategies {
+                  key
+                }
+              }
+            }
+          `,
           variables: {
-            loginToken: this.loginToken,
+            continuationToken: this.continuationToken,
             securityCode: this.securityCode
           }
         }).then(resp => {
@@ -199,33 +414,116 @@ export default {
                 icon: 'check'
               })
               _.delay(() => {
-                window.location.replace('/') // TEMPORARY - USE RETURNURL
+                const loginRedirect = Cookies.get('loginRedirect')
+                if (loginRedirect) {
+                  Cookies.remove('loginRedirect')
+                  window.location.replace(loginRedirect)
+                } else if (respObj.redirect) {
+                  window.location.replace(respObj.redirect)
+                } else {
+                  window.location.replace('/')
+                }
               }, 1000)
               this.isLoading = false
             } else {
               throw new Error(respObj.responseResult.message)
             }
           } else {
-            throw new Error('Authentication is unavailable.')
+            throw new Error(this.$t('auth:genericError'))
           }
         }).catch(err => {
           console.error(err)
           this.$store.commit('showNotification', {
             style: 'red',
             message: err.message,
-            icon: 'warning'
+            icon: 'alert'
           })
           this.isLoading = false
         })
       }
+    },
+    /**
+     * CHANGE PASSWORD
+     */
+    async changePassword () {
+      this.loaderColor = 'grey darken-4'
+      this.loaderTitle = this.$t('auth:changePwd.loading')
+      this.isLoading = true
+      const resp = await this.$apollo.mutate({
+        mutation: gql`
+          {
+            authentication {
+              activeStrategies {
+                key
+              }
+            }
+          }
+        `,
+        variables: {
+          continuationToken: this.continuationToken,
+          newPassword: this.newPassword
+        }
+      })
+      if (_.get(resp, 'data.authentication.loginChangePassword.responseResult.succeeded', false) === true) {
+        this.loaderColor = 'green darken-1'
+        this.loaderTitle = this.$t('auth:loginSuccess')
+        Cookies.set('jwt', _.get(resp, 'data.authentication.loginChangePassword.jwt', ''), { expires: 365 })
+        _.delay(() => {
+          window.location.replace('/') // TEMPORARY - USE RETURNURL
+        }, 1000)
+      } else {
+        this.$store.commit('showNotification', {
+          style: 'red',
+          message: _.get(resp, 'data.authentication.loginChangePassword.responseResult.message', false),
+          icon: 'alert'
+        })
+        this.isLoading = false
+      }
+    },
+    /**
+     * SWITCH TO FORGOT PASSWORD SCREEN
+     */
+    forgotPassword () {
+      this.screen = 'forgot'
+      this.$nextTick(() => {
+        this.$refs.iptForgotPwdEmail.focus()
+      })
+    },
+    /**
+     * FORGOT PASSWORD SUBMIT
+     */
+    async forgotPasswordSubmit () {
+      this.$store.commit('showNotification', {
+        style: 'pink',
+        message: 'Coming soon!',
+        icon: 'ferry'
+      })
     }
   },
   apollo: {
     strategies: {
-      query: strategiesQuery,
-      update: (data) => data.authentication.strategies,
+      query: gql`
+        {
+          authentication {
+            activeStrategies {
+              key
+              strategy {
+                key
+                logo
+                color
+                icon
+                useForm
+                usernameType
+              }
+              displayName
+              order
+              selfRegistration
+            }
+          }
+        }
+      `,
+      update: (data) => _.sortBy(data.authentication.activeStrategies, ['order']),
       watchLoading (isLoading) {
-        this.isLoading = isLoading
         this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'login-strategies-refresh')
       }
     }
@@ -235,294 +533,92 @@ export default {
 
 <style lang="scss">
   .login {
-    background-color: mc('blue', '800');
-    background-image: url('../static/svg/login-bg-motif.svg');
-    background-repeat: repeat;
-    background-size: 200px;
+    // background-image: url('/_assets/img/splash/1.jpg');
+    background-color: mc('grey', '900');
+    background-size: cover;
+    background-position: center center;
     width: 100%;
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: loginBgReveal 20s linear infinite;
 
-    @include keyframes(loginBgReveal) {
-      0% {
-        background-position-y: 0;
+    &-sd {
+      background-color: rgba(255,255,255,.8);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-left: 1px solid rgba(255,255,255,.85);
+      border-right: 1px solid rgba(255,255,255,.85);
+      width: 450px;
+      height: 100%;
+      margin-left: 5vw;
+
+      @at-root .no-backdropfilter & {
+        background-color: rgba(255,255,255,.95);
       }
-      100% {
-        background-position-y: -800px;
+
+      @include until($tablet) {
+        margin-left: 0;
+        width: 100%;
       }
     }
 
-    &::before {
-      content: '';
-      position: absolute;
-      background-image: url('../static/svg/login-bg.svg');
-      background-position: center bottom;
-      background-size: cover;
-      top: 0;
-      left: 0;
-      width: 100vw;
+    &-logo {
+      padding: 12px 0 0 12px;
+      width: 58px;
+      height: 58px;
+      background-color: #222;
+      margin-left: 12px;
+      border-bottom-left-radius: 7px;
+      border-bottom-right-radius: 7px;
+    }
+
+    &-title {
+      height: 58px;
+      padding-left: 12px;
+      display: flex;
+      align-items: center;
+      text-shadow: .5px .5px #FFF;
+    }
+
+    &-subtitle {
+      padding: 24px 12px 12px 12px;
+      color: #111;
+      font-weight: 500;
+      text-shadow: 1px 1px rgba(255,255,255,.5);
+      background-image: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.15));
+      text-align: center;
+      border-bottom: 1px solid rgba(0,0,0,.3);
+    }
+
+    &-info {
+      border-top: 1px solid rgba(255,255,255,.85);
+      background-color: rgba(255,255,255,.15);
+      border-bottom: 1px solid rgba(0,0,0,.15);
+      padding: 12px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    &-list {
+      border-top: 1px solid rgba(255,255,255,.85);
+      padding: 12px;
+    }
+
+    &-form {
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,.85);
+    }
+
+    &-main {
+      flex: 1 0 100vw;
       height: 100vh;
-
-      @include until($tablet) {
-        display: none;
-      }
-    }
-
-    &::after {
-      content: '';
-      position: absolute;
-      background-image: linear-gradient(to bottom, rgba(mc('blue', '800'), 1) 0%, rgba(mc('blue', '800'), 0) 100%);
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 25vh;
-    }
-
-    &-mascot {
-      width: 200px;
-      height: 200px;
-      position: absolute;
-      top: -180px;
-      left: 50%;
-      margin-left: -100px;
-      z-index: 10;
-
-      @include until($tablet) {
-        display: none;
-      }
-    }
-
-    &-container {
-      position: relative;
-      display: flex;
-      width: 400px;
-      align-items: stretch;
-      box-shadow: 0 14px 28px rgba(0,0,0,0.2);
-      border-radius: 6px;
-      animation: zoomIn .5s ease;
-
-      &::after {
-        position: absolute;
-        top: 1rem;
-        right: 1rem;
-        content: " ";
-        @include spinner(mc('blue', '500'),0.5s,16px);
-        display: none;
-      }
-
-      &.is-expanded {
-        width: 650px;
-
-        .login-frame {
-          border-radius: 0 6px 6px 0;
-          border-left: none;
-
-          @include until($tablet) {
-            border-radius: 0;
-          }
-        }
-      }
-
-      &.is-loading::after {
-        display: block;
-      }
-
-      @include until($tablet) {
-        width: 100%;
-        border-radius: 0;
-
-        &.is-expanded {
-          width: 100%;
-        }
-      }
-    }
-
-    &-providers {
-      display: flex;
-      flex-direction: column;
-      width: 250px;
-
-      border-right: none;
-      border-radius: 6px 0 0 6px;
-      z-index: 1;
-      overflow: hidden;
-
-      @include until($tablet) {
-        width: 50px;
-        border-radius: 0;
-      }
-
-      button {
-        flex: 0 1 50px;
-        padding: 5px 15px;
-        border: none;
-        color: #FFF;
-        // background: linear-gradient(to right, rgba(mc('light-blue', '800'), .7), rgba(mc('light-blue', '800'), 1));
-        // border-top: 1px solid rgba(mc('light-blue', '900'), .5);
-        background: linear-gradient(to right, rgba(0,0,0, .5), rgba(0,0,0, .7));
-        border-top: 1px solid rgba(0,0,0, .2);
-        font-family: $core-font-standard;
-        font-weight: 600;
-        text-align: left;
-        min-height: 40px;
-        display: flex;
-        justify-content: flex-start;
-        align-items: center;
-        transition: all .4s ease;
-
-        &:focus {
-          outline: none;
-        }
-
-        @include until($tablet) {
-          justify-content: center;
-        }
-
-        &:hover {
-          background-color: rgba(0,0,0, .4);
-        }
-
-        &:first-child {
-          border-top: none;
-
-          &.is-active {
-            border-top: 1px solid rgba(255,255,255, .5);
-          }
-        }
-
-        &.is-active {
-          background-image: linear-gradient(to right, rgba(255,255,255,1) 0%,rgba(255,255,255,.77) 100%);
-          color: mc('grey', '800');
-          cursor: default;
-
-          &:hover {
-            background-color: transparent;
-          }
-
-          svg path {
-            fill: mc('grey', '800');
-          }
-        }
-
-        i {
-          margin-right: 10px;
-          font-size: 16px;
-
-          @include until($tablet) {
-            margin-right: 0;
-            font-size: 20px;
-          }
-        }
-
-        svg {
-          margin-right: 10px;
-          width: auto;
-          height: 20px;
-          max-width: 18px;
-          max-height: 20px;
-
-          path {
-            fill: #FFF;
-          }
-
-          @include until($tablet) {
-            margin-right: 0;
-            font-size: 20px;
-          }
-        }
-
-        em {
-          height: 20px;
-        }
-
-        span {
-          font-weight: 600;
-
-          @include until($tablet) {
-            display: none;
-          }
-        }
-      }
-
-      &-fill {
-        flex: 1 1 0;
-        background: linear-gradient(to right, rgba(mc('light-blue', '800'), .7), rgba(mc('light-blue', '800'), 1));
-      }
-    }
-
-    &-frame {
-      background-image: radial-gradient(circle at top center, rgba(255,255,255,1) 5%,rgba(255,255,255,.6) 100%);
-      border: 1px solid rgba(255,255,255, .5);
-      border-radius: 6px;
-      width: 400px;
-      padding: 1rem;
-      color: mc('grey', '700');
-      display: block;
-
-      @include until($tablet) {
-        width: 100%;
-        border-radius: 0;
-        border: none;
-      }
-
-      h1 {
-        font-size: 2rem;
-        font-weight: 400;
-        color: mc('light-blue', '700');
-        text-shadow: 1px 1px 0 #FFF;
-        padding: 1rem 0 0 0;
-        margin: 0;
-      }
-
-      h2 {
-        font-size: 1.5rem;
-        font-weight: 300;
-        color: mc('grey', '700');
-        text-shadow: 1px 1px 0 #FFF;
-        padding: 0;
-        margin: 0 0 25px 0;
-      }
     }
 
     &-tfa {
-      position: relative;
-      display: flex;
-      width: 400px;
-      align-items: stretch;
-      box-shadow: 0 14px 28px rgba(0,0,0,0.2);
-      border-radius: 6px;
-      animation: zoomIn .5s ease;
-    }
+      background-color: #EEE;
+      border: 7px solid #FFF;
 
-    &-copyright {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: absolute;
-      left: 0;
-      bottom: 10vh;
-      width: 100%;
-      z-index: 2;
-      color: mc('grey', '500');
-      font-weight: 400;
-
-      a {
-        font-weight: 600;
-        color: mc('blue', '500');
-        margin-left: .25rem;
-
-        @include until($tablet) {
-          color: mc('blue', '200');
-        }
+      &-field input {
+        text-align: center;
       }
-
-      @include until($tablet) {
-        color: mc('blue', '50');
-      }
-
     }
   }
 </style>

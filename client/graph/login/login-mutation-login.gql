@@ -7,8 +7,10 @@ mutation($username: String!, $password: String!, $strategy: String!) {
         slug
         message
       }
-      tfaRequired
-      tfaLoginToken
+      jwt
+      mustChangePwd
+      mustProvideTFA
+      continuationToken
     }
   }
 }

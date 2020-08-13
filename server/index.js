@@ -4,15 +4,19 @@
 // ===========================================
 
 const path = require('path')
+const { nanoid } = require('nanoid')
+const { DateTime } = require('luxon')
 
 let WIKI = {
   IS_DEBUG: process.env.NODE_ENV === 'development',
   IS_MASTER: true,
   ROOTPATH: process.cwd(),
+  INSTANCE_ID: nanoid(10),
   SERVERPATH: path.join(process.cwd(), 'server'),
   Error: require('./helpers/error'),
   configSvc: require('./core/config'),
-  kernel: require('./core/kernel')
+  kernel: require('./core/kernel'),
+  startedAt: DateTime.utc()
 }
 global.WIKI = WIKI
 
@@ -23,21 +27,6 @@ WIKI.configSvc.init()
 // ----------------------------------------
 
 WIKI.logger = require('./core/logger').init('MASTER')
-
-// ----------------------------------------
-// Init Telemetry
-// ----------------------------------------
-
-WIKI.telemetry = require('./core/telemetry').init()
-
-process.on('unhandledRejection', (err) => {
-  WIKI.logger.warn(err)
-  WIKI.telemetry.sendError(err)
-})
-process.on('uncaughtException', (err) => {
-  WIKI.logger.warn(err)
-  WIKI.telemetry.sendError(err)
-})
 
 // ----------------------------------------
 // Start Kernel

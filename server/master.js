@@ -4,13 +4,11 @@ const compression = require('compression')
 const cookieParser = require('cookie-parser')
 const cors = require('cors')
 const express = require('express')
-const favicon = require('serve-favicon')
-const http = require('http')
-const path = require('path')
 const session = require('express-session')
-const SessionRedisStore = require('connect-redis')(session)
-const { ApolloServer } = require('apollo-server-express')
-// const oauth2orize = require('oauth2orize')
+const KnexSessionStore = require('connect-session-knex')(session)
+const favicon = require('serve-favicon')
+const path = require('path')
+const _ = require('lodash')
 
 /* global WIKI */
 
@@ -21,6 +19,8 @@ module.exports = async () => {
 
   WIKI.auth = require('./core/auth').init()
   WIKI.lang = require('./core/localization').init()
+  WIKI.mail = require('./core/mail').init()
+  WIKI.system = require('./core/system').init()
 
   // ----------------------------------------
   // Load middlewares
@@ -44,42 +44,55 @@ module.exports = async () => {
   app.use(mw.security)
   app.use(cors(WIKI.config.cors))
   app.options('*', cors(WIKI.config.cors))
-  app.enable('trust proxy')
+  if (WIKI.config.security.securityTrustProxy) {
+    app.enable('trust proxy')
+  }
 
   // ----------------------------------------
   // Public Assets
   // ----------------------------------------
 
   app.use(favicon(path.join(WIKI.ROOTPATH, 'assets', 'favicon.ico')))
-  app.use(express.static(path.join(WIKI.ROOTPATH, 'assets'), {
+  app.use('/_assets/svg/twemoji', async (req, res, next) => {
+    try {
+      WIKI.asar.serve('twemoji', req, res, next)
+    } catch (err) {
+      res.sendStatus(404)
+    }
+  })
+  app.use('/_assets', express.static(path.join(WIKI.ROOTPATH, 'assets'), {
     index: false,
     maxAge: '7d'
   }))
 
   // ----------------------------------------
-  // OAuth2 Server
+  // SSL Handlers
   // ----------------------------------------
 
-  // const OAuth2Server = oauth2orize.createServer()
+  app.use('/', ctrl.ssl)
 
   // ----------------------------------------
   // Passport Authentication
   // ----------------------------------------
 
-  let sessionStore = new SessionRedisStore({
-    client: WIKI.redis
-  })
-
   app.use(cookieParser())
   app.use(session({
-    name: 'wikijs.sid',
-    store: sessionStore,
     secret: WIKI.config.sessionSecret,
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    store: new KnexSessionStore({
+      knex: WIKI.models.knex
+    })
   }))
   app.use(WIKI.auth.passport.initialize())
-  app.use(WIKI.auth.passport.session())
+  app.use(WIKI.auth.authenticate)
+
+  // ----------------------------------------
+  // GraphQL Server
+  // ----------------------------------------
+
+  app.use(bodyParser.json({ limit: '1mb' }))
+  await WIKI.servers.startGraphQL()
 
   // ----------------------------------------
   // SEO
@@ -94,7 +107,6 @@ module.exports = async () => {
   app.set('views', path.join(WIKI.SERVERPATH, 'views'))
   app.set('view engine', 'pug')
 
-  app.use(bodyParser.json({ limit: '1mb' }))
   app.use(bodyParser.urlencoded({ extended: false, limit: '1mb' }))
 
   // ----------------------------------------
@@ -107,11 +119,17 @@ module.exports = async () => {
   // View accessible data
   // ----------------------------------------
 
+  app.locals.siteConfig = {}
+  app.locals.analyticsCode = {}
   app.locals.basedir = WIKI.ROOTPATH
-  app.locals._ = require('lodash')
-  app.locals.moment = require('moment')
-  app.locals.moment.locale(WIKI.config.lang.code)
   app.locals.config = WIKI.config
+  app.locals.pageMeta = {
+    title: '',
+    description: WIKI.config.description,
+    image: '',
+    url: '/'
+  }
+  app.locals.devMode = WIKI.devMode
 
   // ----------------------------------------
   // HMR (Dev Mode Only)
@@ -123,36 +141,28 @@ module.exports = async () => {
   }
 
   // ----------------------------------------
-  // Apollo Server (GraphQL)
-  // ----------------------------------------
-
-  const graphqlSchema = require('./graph')
-  const apolloServer = new ApolloServer({
-    ...graphqlSchema,
-    context: ({ req, res }) => ({ req, res })
-  })
-  apolloServer.applyMiddleware({ app })
-
-  // ----------------------------------------
   // Routing
   // ----------------------------------------
 
+  app.use(async (req, res, next) => {
+    res.locals.siteConfig = {
+      title: WIKI.config.title,
+      theme: WIKI.config.theming.theme,
+      darkMode: WIKI.config.theming.darkMode,
+      lang: WIKI.config.lang.code,
+      rtl: WIKI.config.lang.rtl,
+      company: WIKI.config.company,
+      contentLicense: WIKI.config.contentLicense,
+      logoUrl: WIKI.config.logoUrl
+    }
+    res.locals.langs = await WIKI.models.locales.getNavLocales({ cache: true })
+    res.locals.analyticsCode = await WIKI.models.analytics.getCode({ cache: true })
+    next()
+  })
+
   app.use('/', ctrl.auth)
-
-  // app.use('/graphql', (req, res, next) => {
-  //   graphqlApollo.graphqlExpress({
-  //     schema: graphqlSchema,
-  //     context: { req, res },
-  //     formatError: (err) => {
-  //       return {
-  //         message: err.message
-  //       }
-  //     }
-  //   })(req, res, next)
-  // })
-  // app.use('/graphiql', graphqlApollo.graphiqlExpress({ endpointURL: '/graphql' }))
-
-  app.use('/', mw.auth, ctrl.common)
+  app.use('/', ctrl.upload)
+  app.use('/', ctrl.common)
 
   // ----------------------------------------
   // Error handling
@@ -165,60 +175,32 @@ module.exports = async () => {
   })
 
   app.use((err, req, res, next) => {
-    res.status(err.status || 500)
-    res.render('error', {
-      message: err.message,
-      error: WIKI.IS_DEBUG ? err : {}
-    })
+    if (req.path === '/graphql') {
+      res.status(err.status || 500).json({
+        data: {},
+        errors: [{
+          message: err.message,
+          path: []
+        }]
+      })
+    } else {
+      res.status(err.status || 500)
+      _.set(res.locals, 'pageMeta.title', 'Error')
+      res.render('error', {
+        message: err.message,
+        error: WIKI.IS_DEBUG ? err : {}
+      })
+    }
   })
 
   // ----------------------------------------
-  // HTTP server
+  // Start HTTP Server(s)
   // ----------------------------------------
 
-  let srvConnections = {}
+  await WIKI.servers.startHTTP()
 
-  WIKI.logger.info(`HTTP Server on port: [ ${WIKI.config.port} ]`)
-
-  app.set('port', WIKI.config.port)
-  WIKI.server = http.createServer(app)
-
-  WIKI.server.listen(WIKI.config.port)
-  WIKI.server.on('error', (error) => {
-    if (error.syscall !== 'listen') {
-      throw error
-    }
-
-    // handle specific listen errors with friendly messages
-    switch (error.code) {
-      case 'EACCES':
-        WIKI.logger.error('Listening on port ' + WIKI.config.port + ' requires elevated privileges!')
-        return process.exit(1)
-      case 'EADDRINUSE':
-        WIKI.logger.error('Port ' + WIKI.config.port + ' is already in use!')
-        return process.exit(1)
-      default:
-        throw error
-    }
-  })
-
-  WIKI.server.on('connection', conn => {
-    let key = `${conn.remoteAddress}:${conn.remotePort}`
-    srvConnections[key] = conn
-    conn.on('close', function() {
-      delete srvConnections[key]
-    })
-  })
-
-  WIKI.server.on('listening', () => {
-    WIKI.logger.info('HTTP Server: [ RUNNING ]')
-  })
-
-  WIKI.server.destroy = (cb) => {
-    WIKI.server.close(cb)
-    for (let key in srvConnections) {
-      srvConnections[key].destroy()
-    }
+  if (WIKI.config.ssl.enabled === true || WIKI.config.ssl.enabled === 'true' || WIKI.config.ssl.enabled === 1 || WIKI.config.ssl.enabled === '1') {
+    await WIKI.servers.startHTTPS()
   }
 
   return true

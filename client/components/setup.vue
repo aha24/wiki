@@ -1,319 +1,118 @@
 <template lang="pug">
   v-app.setup
-    v-toolbar(color='blue darken-2', dark, app, clipped-left, fixed, flat)
-      v-spacer
-      v-toolbar-title
-        span.subheading Wiki.js Setup
-      v-spacer
     v-content
-      v-progress-linear.ma-0(indeterminate, height='4', :active='loading')
-      v-stepper.elevation-0(v-model='state')
-        v-stepper-header
-          v-stepper-step(step='1' :complete='state > 1')
-            | Welcome
-            small Wiki.js Installation Wizard
-          v-divider
-          v-stepper-step(step='2' :complete='state > 2')
-            | System Check
-            small Checking your system for compatibility
-          v-divider
-          v-stepper-step(step='3' :complete='state > 3')
-            | General Information
-            small Site Title, Language and Access
-          v-divider
-          v-stepper-step(step='4' :complete='state > 4')
-            | Administration Account
-            small Create the admin account
-          v-divider(v-if='this.conf.upgrade')
-          v-stepper-step(step='5' :complete='state > 5', v-if='this.conf.upgrade')
-            | Upgrade from Wiki.js 1.x
-            small Migrate your existing installation
-          v-divider
-          v-stepper-step(:step='this.conf.upgrade ? 6 : 5' :complete='this.conf.upgrade ? state > 5 : state > 6')
-            | Final Steps
-            small Finalizing your installation
-
-        v-stepper-items
-          //- ==============================================
-          //- WELCOME
-          //- ==============================================
-
-          v-stepper-content(step='1')
-            v-card.text-xs-center.pa-3(flat)
-              img(src='/svg/logo-wikijs.svg', alt='Wiki.js Logo', style='width: 300px;')
-            v-container
-              .body-2.py-2 This installation wizard will guide you through the steps needed to get your wiki up and running in no time!
-              .body-1
-                | Detailed information about installation and usage can be found on the #[a(href='https://wiki.requarks.io/docs') official documentation site].
-                br
-                | Should you have any question or would like to report something that doesn't look right, feel free to create a new issue on the #[a(href='https://github.com/Requarks/wiki/issues') GitHub project].
-              .body-1.pt-3
-                svg.icons.is-18.is-outlined.has-right-pad.is-text: use(xlink:href='#nc-cd-reader')
-                span You are about to install Wiki.js #[strong {{wikiVersion}}].
-              v-divider
-              v-form
-                v-checkbox(
+      v-container
+        v-layout
+          v-flex(xs12, lg6, offset-lg3)
+            v-card.elevation-20.radius-7.animated.fadeInUp
+              v-alert(v-if='isDevMode', tile, dark, color='red darken-3', icon='mdi-alert', prominent)
+                .body-2 You are running an unstable, unreleased development version. This code base is #[strong NOT] for production use!
+                .body-2.mt-3 Cloning the master branch directly from GitHub is #[strong NOT] the proper way to install Wiki.js!
+                .body-2 Read the #[a(href='https://docs.requarks.io/install', style='color: #FFF;') documentation] on correctly installing the latest stable version.
+              .text-center
+                img.setup-logo.animated.fadeInUp.wait-p2s(src='/_assets/svg/logo-wikijs-full.svg', alt='Wiki.js Logo')
+              v-alert(v-model='error', type='error', icon='mdi-alert', tile, dismissible) {{ errorMessage }}
+              v-alert(v-if='!error', tile, color='blue lighten-5', :value='true')
+                v-icon.mr-3(color='blue') mdi-package-variant
+                span.blue--text You are about to install Wiki.js #[strong {{wikiVersion}}].
+              v-card-text
+                .overline.pl-3 Administrator Account
+                v-container.pa-3.mt-3(grid-list-xl)
+                  v-layout(row, wrap)
+                    v-flex(xs12)
+                      v-text-field(
+                        outlined
+                        v-model='conf.adminEmail',
+                        label='Administrator Email',
+                        hint='The email address of the administrator account.',
+                        persistent-hint
+                        required
+                        ref='adminEmailInput'
+                      )
+                    v-flex(xs6)
+                      v-text-field(
+                        outlined
+                        ref='adminPassword',
+                        counter='255'
+                        v-model='conf.adminPassword',
+                        label='Password',
+                        :append-icon="pwdMode ? 'mdi-eye-off' : 'mdi-eye'"
+                        @click:append="() => (pwdMode = !pwdMode)"
+                        :type="pwdMode ? 'password' : 'text'"
+                        hint='At least 8 characters long.',
+                        persistent-hint
+                      )
+                    v-flex(xs6)
+                      v-text-field(
+                        outlined
+                        ref='adminPasswordConfirm',
+                        counter='255'
+                        v-model='conf.adminPasswordConfirm',
+                        label='Confirm Password',
+                        :append-icon="pwdConfirmMode ? 'mdi-eye-off' : 'mdi-eye'"
+                        @click:append="() => (pwdConfirmMode = !pwdConfirmMode)"
+                        :type="pwdConfirmMode ? 'password' : 'text'"
+                        hint='Verify your password again.',
+                        persistent-hint
+                      )
+                v-divider.mb-4
+                .overline.pl-3.mb-5 Site URL
+                v-text-field.mb-4.mx-3(
+                  outlined
+                  ref='adminSiteUrl',
+                  v-model='conf.siteUrl',
+                  label='Site URL',
+                  hint='Full URL to your wiki, without the trailing slash (e.g. https://wiki.example.com). This should be the public facing URL, not the internal one if using a reverse-proxy.',
+                  persistent-hint
+                  @keyup.enter='install'
+                )
+                v-divider.mb-4
+                .overline.pl-3.mb-3 Telemetry
+                v-switch.ml-3(
+                  inset
                   color='primary',
                   v-model='conf.telemetry',
                   label='Allow Telemetry',
                   persistent-hint,
                   hint='Help Wiki.js developers improve this app with anonymized telemetry.'
                 )
-                v-checkbox.mt-3(
-                  color='primary',
-                  v-model='conf.upgrade',
-                  label='Upgrade from Wiki.js 1.x',
-                  persistent-hint,
-                  hint='Check this box if you are upgrading from Wiki.js 1.x and wish to migrate your existing data.'
-                )
-            v-divider
-            .text-xs-center
-              v-btn(color='primary', @click='proceedToSyscheck', :disabled='loading') Start
+                a.pl-3(style='font-size: 12px; letter-spacing: initial;', href='https://docs.requarks.io/telemetry', target='_blank') Learn more
+              v-divider.mt-2
+              v-card-actions
+                v-btn(color='primary', @click='install', :disabled='loading', x-large, depressed, block)
+                  v-icon(left) mdi-check
+                  span Install
 
-          //- ==============================================
-          //- SYSTEM CHECK
-          //- ==============================================
-
-          v-stepper-content(step='2')
-            v-card.text-xs-center(flat)
-              svg.icons.is-64: use(xlink:href='#nc-metrics')
-              .subheading System Check
-            v-container
-              v-layout(row, align-center, v-if='loading')
-                v-progress-circular(v-if='loading', indeterminate, color='blue')
-                .body-2.blue--text.ml-3 Checking your system for compatibility...
-              v-alert(type='success', outline, :value='!loading && syscheck.ok') Looks good! No issues so far.
-              v-alert(type='error', outline, :value='!loading && !syscheck.ok') {{ syscheck.error }}
-              v-list.mt-3(two-line, v-if='!loading && syscheck.ok', dense)
-                template(v-for='(rs, n) in syscheck.results')
-                  v-divider(v-if='n > 0', inset)
-                  v-list-tile
-                    v-list-tile-avatar(color='green lighten-5')
-                      v-icon(color='green') check
-                    v-list-tile-content
-                      v-list-tile-title {{rs.title}}
-                      v-list-tile-sub-title {{rs.subtitle}}
-            v-divider
-            .text-xs-center
-              v-btn(@click='proceedToWelcome', :disabled='loading') Back
-              v-btn(color='primary', @click='proceedToSyscheck', v-if='!loading && !syscheck.ok') Check Again
-              v-btn(color='red', dark, @click='proceedToGeneral', v-if='!loading && !syscheck.ok') Continue Anyway
-              v-btn(color='primary', @click='proceedToGeneral', v-if='loading || syscheck.ok', :disabled='loading') Continue
-
-          //- ==============================================
-          //- GENERAL
-          //- ==============================================
-
-          v-stepper-content(step='3')
-            v-card.text-xs-center(flat)
-              svg.icons.is-64: use(xlink:href='#nc-webpage')
-              .subheading General Information
-            v-form
-              v-container
-                v-layout(row, wrap)
-                  v-flex(xs12, sm6).pr-3
-                    v-text-field(
-                      v-model='conf.title',
-                      label='Site Title',
-                      :counter='255',
-                      persistent-hint,
-                      hint='The site title will appear in the top left corner on every page and within the window title bar.',
-                      v-validate='{ required: true, min: 2 }',
-                      data-vv-name='siteTitle',
-                      data-vv-as='Site Title',
-                      data-vv-scope='general',
-                      :error-messages='errors.collect(`siteTitle`)'
-                    )
-                  v-flex.pr-3(xs12, sm6)
-                    v-text-field(
-                      v-model='conf.port',
-                      label='Server Port',
-                      persistent-hint,
-                      hint='The port on which Wiki.js will listen to. Usually port 80 if connecting directly, or a random port (e.g. 3000) if using a web server in front of it. Set $(PORT) to use the PORT environment variable.',
-                      v-validate='{ required: true }',
-                      data-vv-name='port',
-                      data-vv-as='Port',
-                      data-vv-scope='general',
-                      :error-messages='errors.collect(`port`)'
-                    )
-                v-layout(row, wrap).mt-3
-                  v-flex(xs12, sm6).pr-3
-                    v-text-field(
-                      v-model='conf.pathContent',
-                      label='Content Data Path',
-                      persistent-hint,
-                      hint='The path where content is stored (markdown files, uploads, etc.)',
-                      v-validate='{ required: true, min: 2 }',
-                      data-vv-name='pathContent',
-                      data-vv-as='Content Data Path',
-                      data-vv-scope='general',
-                      :error-messages='errors.collect(`pathContent`)'
-                    )
-                  v-flex(xs12, sm6)
-                    v-text-field(
-                      v-model='conf.pathData',
-                      label='Temporary Data Path',
-                      persistent-hint,
-                      hint='The path where temporary data is stored (cache, thumbnails, temporary upload files, etc.)',
-                      v-validate='{ required: true, min: 2 }',
-                      data-vv-name='pathData',
-                      data-vv-as='Temporary Data Path',
-                      data-vv-scope='general',
-                      :error-messages='errors.collect(`pathData`)'
-                    )
-                v-layout(row, wrap).mt-3
-                  v-flex(xs12)
-                    v-checkbox(
-                      color='primary',
-                      v-model='conf.public',
-                      label='Public Access',
-                      persistent-hint,
-                      hint='Should the site be accessible (read only) without login.'
-                    )
-                    v-checkbox.mt-2(
-                      color='primary',
-                      v-model='conf.selfRegister',
-                      label='Allow Self-Registration',
-                      persistent-hint,
-                      hint='Can users create their own account to gain access?'
-                    )
-            v-divider
-            .text-xs-center
-              v-btn(@click='proceedToSyscheck', :disabled='loading') Back
-              v-btn(color='primary', @click='proceedToAdmin', :disabled='loading') Continue
-
-          //- ==============================================
-          //- ADMINISTRATOR ACCOUNT
-          //- ==============================================
-
-          v-stepper-content(step='4')
-            v-card.text-xs-center(flat)
-              svg.icons.is-64: use(xlink:href='#nc-man-black')
-              .subheading Administrator Account
-              .body-2 A root administrator account will be created for local authentication. From this account, you can create or authorize more users.
-            v-form
-              v-container
-                v-layout(row, wrap)
-                  v-flex(xs12)
-                    v-text-field(
-                      autofocus
-                      v-model='conf.adminEmail',
-                      label='Administrator Email',
-                      hint='The email address of the administrator account',
-                      v-validate='{ required: true, email: true }',
-                      data-vv-name='adminEmail',
-                      data-vv-as='Administrator Email',
-                      data-vv-scope='admin',
-                      :error-messages='errors.collect(`adminEmail`)'
-                    )
-                  v-flex.pr-3(xs6)
-                    v-text-field(
-                      ref='adminPassword',
-                      counter='255'
-                      v-model='conf.adminPassword',
-                      label='Password',
-                      :append-icon="pwdMode ? 'visibility' : 'visibility_off'"
-                      :append-icon-cb="() => (pwdMode = !pwdMode)"
-                      :type="pwdMode ? 'password' : 'text'"
-                      hint='At least 8 characters long.',
-                      v-validate='{ required: true, min: 8 }',
-                      data-vv-name='adminPassword',
-                      data-vv-as='Password',
-                      data-vv-scope='admin',
-                      :error-messages='errors.collect(`adminPassword`)'
-                    )
-                  v-flex(xs6)
-                    v-text-field(
-                      ref='adminPasswordConfirm',
-                      counter='255'
-                      v-model='conf.adminPasswordConfirm',
-                      label='Confirm Password',
-                      :append-icon="pwdConfirmMode ? 'visibility' : 'visibility_off'"
-                      :append-icon-cb="() => (pwdConfirmMode = !pwdConfirmMode)"
-                      :type="pwdConfirmMode ? 'password' : 'text'"
-                      hint='Verify your password again.',
-                      v-validate='{ required: true, min: 8 }',
-                      data-vv-name='adminPasswordConfirm',
-                      data-vv-as='Confirm Password',
-                      data-vv-scope='admin',
-                      :error-messages='errors.collect(`adminPasswordConfirm`)'
-                    )
-              .text-xs-center
-                v-btn(@click='proceedToGeneral', :disabled='loading') Back
-                v-btn(color='primary', @click='proceedToUpgrade', :disabled='loading') Continue
-
-          //- ==============================================
-          //- UPGRADE FROM 1.x
-          //- ==============================================
-
-          v-stepper-content(step='5', v-if='conf.upgrade')
-            v-card.text-xs-center(flat)
-              svg.icons.is-64: use(xlink:href='#nc-spaceship')
-              .subheading Upgrade from Wiki.js 1.x
-              .body-2 Migrating from a Wiki.js 1.x installation is quick and simple.
-            v-form
-              v-container
-                v-layout(row)
-                  v-flex(xs12)
-                    v-text-field(
-                      v-model='conf.upgMongo',
-                      placeholder='mongodb://',
-                      label='Connection String to Wiki.js 1.x MongoDB database',
-                      persistent-hint,
-                      hint='A MongoDB database connection string where a Wiki.js 1.x installation is located. No alterations will be made to this database.',
-                      v-validate='{ required: true, min: 2 }',
-                      data-vv-name='upgMongo',
-                      data-vv-as='MongoDB Connection String',
-                      data-vv-scope='upgrade',
-                      :error-messages='errors.collect(`upgMongo`)'
-                    )
-            .text-xs-center
-              v-btn(@click='proceedToAdmin', :disabled='loading') Back
-              v-btn(color='primary', @click='proceedToFinal', :disabled='loading') Continue
-
-          //- ==============================================
-          //- FINAL
-          //- ==============================================
-
-          v-stepper-content(:step='conf.upgrade ? 6 : 5')
-            v-card.text-xs-center(flat)
-              template(v-if='loading')
-                v-progress-circular(size='64', indeterminate, color='blue')
-                .subheading Finalizing your installation...
-              template(v-else-if='final.ok')
-                svg.icons.is-64: use(xlink:href='#nc-check-bold')
-                .subheading Installation complete!
-              template(v-else)
-                svg.icons.is-64: use(xlink:href='#nc-square-remove')
-                .subheading Something went wrong...
-            v-container
-              v-alert(type='success', outline, :value='!loading && final.ok') Wiki.js was configured successfully and is now ready for use.
-              v-alert(type='error', outline, :value='!loading && !final.ok') {{ final.error }}
-            v-divider
-            .text-xs-center
-              v-btn(@click='!conf.upgrade ? proceedToAdmin() : proceedToUpgrade()', :disabled='loading') Back
-              v-btn(color='primary', @click='proceedToFinal', v-if='!loading && !final.ok') Try Again
-              v-btn(color='success', @click='finish', v-if='loading || final.ok', :disabled='loading') Continue
-
-    v-footer.pa-3(app, absolute, color='grey darken-3', height='auto')
-      .caption.grey--text Wiki.js
-      v-spacer
-      .caption.grey--text(v-if='conf.telemetry') Telemetry Client ID: {{telemetryId}}
+    v-dialog(v-model='loading', width='450', persistent)
+      v-card(color='primary', dark).radius-7
+        v-card-text.text-center.py-5
+          .py-3(style='width: 64px; display:inline-block;')
+            breeding-rhombus-spinner(
+              :animation-duration='2000'
+              :size='64'
+              color='#FFF'
+              )
+          template(v-if='!success')
+            .subtitle-1.white--text Finalizing your installation...
+            .caption Just a moment
+          template(v-else)
+            .subtitle-1.white--text Installation complete!
+            .caption Redirecting...
 </template>
 
 <script>
+import _ from 'lodash'
+import validate from 'validate.js'
+import { BreedingRhombusSpinner } from 'epic-spinners'
+import confetti from 'canvas-confetti'
 
 /* global siteConfig */
 
-import axios from 'axios'
-import _ from 'lodash'
-
 export default {
+  components: {
+    BreedingRhombusSpinner
+  },
   props: {
-    telemetryId: {
-      type: String,
-      required: true
-    },
     wikiVersion: {
       type: String,
       required: true
@@ -322,148 +121,111 @@ export default {
   data() {
     return {
       loading: false,
-      state: 1,
-      syscheck: {
-        ok: false,
-        error: '',
-        results: []
-      },
-      final: {
-        ok: false,
-        error: '',
-        redirectUrl: ''
-      },
+      success: false,
+      error: false,
+      errorMessage: '',
       conf: {
         adminEmail: '',
         adminPassword: '',
         adminPasswordConfirm: '',
-        lang: siteConfig.lang || 'en',
-        pathData: './data',
-        pathContent: './content',
-        port: siteConfig.port || 80,
-        public: (siteConfig.public === true),
-        selfRegister: (siteConfig.selfRegister === true),
-        telemetry: true,
-        title: siteConfig.title || 'Wiki',
-        upgrade: false,
-        upgMongo: 'mongodb://'
+        siteUrl: 'https://wiki.yourdomain.com',
+        telemetry: true
       },
       pwdMode: true,
-      pwdConfirmMode: true
+      pwdConfirmMode: true,
+      isDevMode: false
     }
   },
+  mounted() {
+    _.delay(() => {
+      this.$refs.adminEmailInput.focus()
+    }, 500)
+    this.isDevMode = siteConfig.devMode === true
+  },
   methods: {
-    proceedToWelcome () {
-      this.state = 1
-      this.loading = false
-    },
-    proceedToSyscheck () {
-      let self = this
-      this.state = 2
-      this.loading = true
-      this.syscheck = {
-        ok: false,
-        error: '',
-        results: []
-      }
+    async install () {
+      this.error = false
 
-      _.delay(() => {
-        axios.post('/syscheck', self.conf).then(resp => {
-          if (resp.data.ok === true) {
-            self.syscheck.ok = true
-            self.syscheck.results = resp.data.results
-          } else {
-            self.syscheck.ok = false
-            self.syscheck.error = resp.data.error
+      const validationResults = validate(this.conf, {
+        adminEmail: {
+          presence: {
+            allowEmpty: false
+          },
+          email: true
+        },
+        adminPassword: {
+          presence: {
+            allowEmpty: false
+          },
+          length: {
+            minimum: 6,
+            maximum: 255
           }
-          self.loading = false
-          self.$nextTick()
-        }).catch(err => {
-          window.alert(err.message)
-        })
-      }, 1000)
-    },
-    proceedToGeneral () {
-      this.state = 3
-      this.loading = false
-    },
-    async proceedToAdmin () {
-      if (this.state < 4) {
-        const validationSuccess = await this.$validator.validateAll('general')
-        if (!validationSuccess) {
-          this.state = 3
-          return
+        },
+        adminPasswordConfirm: {
+          equality: 'adminPassword'
+        },
+        siteUrl: {
+          presence: {
+            allowEmpty: false
+          },
+          url: {
+            schemes: ['http', 'https'],
+            allowLocal: true,
+            allowDataUrl: false
+          },
+          format: {
+            pattern: '^(?!.*/$).*$',
+            flags: 'i',
+            message: 'must not have a trailing slash'
+          }
         }
-      }
-      this.state = 4
-      this.loading = false
-    },
-    async proceedToUpgrade () {
-      if (this.state < 5) {
-        const validationSuccess = await this.$validator.validateAll('admin')
-        if (!validationSuccess || this.conf.adminPassword !== this.conf.adminPasswordConfirm) {
-          this.state = 4
-          return
-        }
+      }, {
+        format: 'flat'
+      })
+      if (validationResults) {
+        this.error = true
+        this.errorMessage = validationResults[0]
+        this.$forceUpdate()
+        return
       }
 
-      if (this.conf.upgrade) {
-        this.state = 5
-        this.loading = false
-      } else {
-        this.proceedToFinal()
-      }
-    },
-    async proceedToFinal () {
-      if (this.conf.upgrade && this.state < 6) {
-        const validationSuccess = await this.$validator.validateAll('upgrade')
-        if (!validationSuccess) {
-          this.state = 5
-          return
-        }
-      }
-
-      this.state = this.conf.upgrade ? 6 : 5
       this.loading = true
-      this.final = {
-        ok: false,
-        error: '',
-        redirectUrl: ''
-      }
+      this.success = false
       this.$forceUpdate()
-      let self = this
 
-      _.delay(() => {
-        axios.post('/finalize', self.conf).then(resp => {
-          if (resp.data.ok === true) {
+      _.delay(async () => {
+        try {
+          const resp = await fetch('/finalize', {
+            method: 'POST',
+            cache: 'no-cache',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(this.conf)
+          }).then(res => res.json())
+
+          if (resp.ok === true) {
             _.delay(() => {
-              self.final.ok = true
-              switch (resp.data.redirectPort) {
-                case 80:
-                  self.final.redirectUrl = `http://${window.location.hostname}${resp.data.redirectPath}/login`
-                  break
-                case 443:
-                  self.final.redirectUrl = `https://${window.location.hostname}${resp.data.redirectPath}/login`
-                  break
-                default:
-                  self.final.redirectUrl = `http://${window.location.hostname}:${resp.data.redirectPort}${resp.data.redirectPath}/login`
-                  break
-              }
-              self.loading = false
-            }, 5000)
+              confetti({
+                particleCount: 100,
+                spread: 70,
+                zIndex: 100000
+              })
+              this.success = true
+              _.delay(() => {
+                window.location.assign('/login')
+              }, 3000)
+            }, 10000)
           } else {
-            self.final.ok = false
-            self.final.error = resp.data.error
-            self.loading = false
+            this.error = true
+            this.errorMessage = resp.error
+            this.loading = false
           }
-          self.$nextTick()
-        }).catch(err => {
+        } catch (err) {
           window.alert(err.message)
-        })
+        }
       }, 1000)
-    },
-    finish () {
-      window.location.assign(this.final.redirectUrl)
     }
   }
 }
@@ -471,5 +233,41 @@ export default {
 </script>
 
 <style lang='scss'>
+.setup {
+  .v-application--wrap {
+    padding-top: 10vh;
+    background-color: #111;
+    background-image: linear-gradient(45deg, mc('blue', '100'), mc('blue', '700'), mc('indigo', '900'));
+    background-blend-mode: exclusion;
 
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100vh;
+      z-index: 0;
+      background-color: transparent;
+      background-image: url(/_assets/svg/motif-grid.svg) !important;
+      background-size: 100px;
+      background-repeat: repeat;
+      animation: bg-anim 100s linear infinite;
+    }
+  }
+
+  @keyframes bg-anim {
+    0% {
+      background-position: 0 0;
+    }
+    100% {
+      background-position: 100% 100%;
+    }
+  }
+
+  &-logo {
+    width: 400px;
+    margin: 2rem 0 2rem 0;
+  }
+}
 </style>

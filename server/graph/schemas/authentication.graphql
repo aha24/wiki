@@ -15,10 +15,12 @@ extend type Mutation {
 # -----------------------------------------------
 
 type AuthenticationQuery {
-  strategies(
-    filter: String
-    orderBy: String
-  ): [AuthenticationStrategy]
+  apiKeys: [AuthenticationApiKey] @auth(requires: ["manage:system", "manage:api"])
+
+  apiState: Boolean! @auth(requires: ["manage:system", "manage:api"])
+
+  strategies: [AuthenticationStrategy] @auth(requires: ["manage:system"])
+  activeStrategies: [AuthenticationActiveStrategy]
 }
 
 # -----------------------------------------------
@@ -26,20 +28,50 @@ type AuthenticationQuery {
 # -----------------------------------------------
 
 type AuthenticationMutation {
+  createApiKey(
+    name: String!
+    expiration: String!
+    fullAccess: Boolean!
+    group: Int
+  ): AuthenticationCreateApiKeyResponse @auth(requires: ["manage:system", "manage:api"])
+
   login(
     username: String!
     password: String!
     strategy: String!
-  ): AuthenticationLoginResponse
+  ): AuthenticationLoginResponse @rateLimit(limit: 5, duration: 60)
 
   loginTFA(
-    loginToken: String!
+    continuationToken: String!
     securityCode: String!
-  ): DefaultResponse
+  ): AuthenticationLoginResponse @rateLimit(limit: 5, duration: 60)
+
+  loginChangePassword(
+    continuationToken: String!
+    newPassword: String!
+  ): AuthenticationLoginResponse @rateLimit(limit: 5, duration: 60)
+
+  register(
+    email: String!
+    password: String!
+    name: String!
+  ): AuthenticationRegisterResponse
+
+  revokeApiKey(
+    id: Int!
+  ): DefaultResponse @auth(requires: ["manage:system", "manage:api"])
+
+  setApiState(
+    enabled: Boolean!
+  ): DefaultResponse @auth(requires: ["manage:system", "manage:api"])
 
   updateStrategies(
-    strategies: [AuthenticationStrategyInput]
-  ): DefaultResponse
+    strategies: [AuthenticationStrategyInput]!
+  ): DefaultResponse @auth(requires: ["manage:system"])
+
+  regenerateCertificates: DefaultResponse @auth(requires: ["manage:system"])
+
+  resetGuestUser: DefaultResponse @auth(requires: ["manage:system"])
 }
 
 # -----------------------------------------------
@@ -47,29 +79,66 @@ type AuthenticationMutation {
 # -----------------------------------------------
 
 type AuthenticationStrategy {
-  isEnabled: Boolean!
   key: String!
-  props: [String]
+  props: [KeyValuePair] @auth(requires: ["manage:system"])
   title: String!
+  description: String
+  isAvailable: Boolean
   useForm: Boolean!
+  usernameType: String
+  logo: String
+  color: String
+  website: String
   icon: String
-  config: [KeyValuePair]
+}
+
+type AuthenticationActiveStrategy {
+  key: String!
+  strategy: AuthenticationStrategy!
+  displayName: String!
+  order: Int!
+  config: [KeyValuePair] @auth(requires: ["manage:system"])
   selfRegistration: Boolean!
-  domainWhitelist: [String]!
-  autoEnrollGroups: [Int]!
+  domainWhitelist: [String]! @auth(requires: ["manage:system"])
+  autoEnrollGroups: [Int]! @auth(requires: ["manage:system"])
 }
 
 type AuthenticationLoginResponse {
   responseResult: ResponseStatus
-  tfaRequired: Boolean
-  tfaLoginToken: String
+  jwt: String
+  mustChangePwd: Boolean
+  mustProvideTFA: Boolean
+  continuationToken: String
+  redirect: String
+}
+
+type AuthenticationRegisterResponse {
+  responseResult: ResponseStatus
+  jwt: String
 }
 
 input AuthenticationStrategyInput {
-  isEnabled: Boolean!
   key: String!
+  strategyKey: String!
   config: [KeyValuePairInput]
+  displayName: String!
+  order: Int!
   selfRegistration: Boolean!
   domainWhitelist: [String]!
   autoEnrollGroups: [Int]!
+}
+
+type AuthenticationApiKey {
+  id: Int!
+  name: String!
+  keyShort: String!
+  expiration: Date!
+  createdAt: Date!
+  updatedAt: Date!
+  isRevoked: Boolean!
+}
+
+type AuthenticationCreateApiKeyResponse {
+  responseResult: ResponseStatus
+  key: String
 }

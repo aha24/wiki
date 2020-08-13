@@ -1,18 +1,31 @@
 const _ = require('lodash')
 const cfgHelper = require('../helpers/config')
 const Promise = require('bluebird')
+const fs = require('fs-extra')
+const path = require('path')
 
 /* global WIKI */
 
 module.exports = {
+  updates: {
+    channel: 'BETA',
+    version: WIKI.version,
+    releaseDate: WIKI.releaseDate,
+    minimumVersionRequired: '2.0.0-beta.0',
+    minimumNodeRequired: '10.12.0'
+  },
+  init() {
+    // Clear content cache
+    fs.emptyDir(path.resolve(WIKI.ROOTPATH, WIKI.config.dataPath, 'cache'))
+
+    return this
+  },
   /**
    * Upgrade from WIKI.js 1.x - MongoDB database
    *
    * @param {Object} opts Options object
    */
   async upgradeFromMongo (opts) {
-    WIKI.telemetry.sendEvent('setup', 'upgradeFromMongo')
-
     WIKI.logger.info('Upgrading from MongoDB...')
 
     let mongo = require('mongodb').MongoClient
@@ -45,7 +58,7 @@ module.exports = {
               $not: 'guest'
             }
           }).toArray()
-          await WIKI.db.User.bulkCreate(_.map(userData, usr => {
+          await WIKI.models.User.bulkCreate(_.map(userData, usr => {
             return {
               email: usr.email,
               name: usr.name || 'Imported User',
@@ -58,8 +71,8 @@ module.exports = {
           }))
 
           resolve(true)
-        } catch (err) {
-          reject(err)
+        } catch (errc) {
+          reject(errc)
         }
         db.close()
       })

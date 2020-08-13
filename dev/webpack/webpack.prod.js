@@ -1,17 +1,22 @@
 const webpack = require('webpack')
 const path = require('path')
 const fs = require('fs-extra')
+const yargs = require('yargs').argv
+const _ = require('lodash')
 
-const CleanWebpackPlugin = require('clean-webpack-plugin')
+const { VueLoaderPlugin } = require('vue-loader')
+const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const CopyWebpackPlugin = require('copy-webpack-plugin')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const HtmlWebpackPugPlugin = require('html-webpack-pug-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
-const OfflinePlugin = require('offline-plugin')
+const MomentTimezoneDataPlugin = require('moment-timezone-data-webpack-plugin')
 const OptimizeCssAssetsPlugin = require('optimize-css-assets-webpack-plugin')
 const ScriptExtHtmlWebpackPlugin = require('script-ext-html-webpack-plugin')
-const SimpleProgressWebpackPlugin = require('simple-progress-webpack-plugin')
-const { VueLoaderPlugin } = require('vue-loader')
+const VuetifyLoaderPlugin = require('vuetify-loader/lib/plugin')
+const WebpackBarPlugin = require('webpackbar')
+
+const now = Math.round(Date.now() / 1000)
 
 const babelConfig = fs.readJsonSync(path.join(process.cwd(), '.babelrc'))
 const cacheDir = '.webpack-cache/cache'
@@ -24,20 +29,25 @@ fs.emptyDirSync(path.join(process.cwd(), 'assets'))
 module.exports = {
   mode: 'production',
   entry: {
-    client: './client/index.js'
+    app: './client/index-app.js',
+    legacy: './client/index-legacy.js',
+    setup: './client/index-setup.js'
   },
   output: {
     path: path.join(process.cwd(), 'assets'),
-    publicPath: '/',
-    filename: 'js/[name].[hash].js',
-    chunkFilename: 'js/[name].[chunkhash].js',
-    globalObject: 'this'
+    publicPath: '/_assets/',
+    filename: `js/[name].js?${now}`,
+    chunkFilename: `js/[name].js?${now}`,
+    globalObject: 'this',
+    crossOriginLoading: 'use-credentials'
   },
   module: {
     rules: [
       {
         test: /\.js$/,
-        exclude: /node_modules/,
+        exclude: (modulePath) => {
+          return modulePath.includes('node_modules') && !modulePath.includes('vuetify')
+        },
         use: [
           {
             loader: 'cache-loader',
@@ -64,6 +74,27 @@ module.exports = {
         ]
       },
       {
+        test: /\.sass$/,
+        use: [
+          {
+            loader: 'cache-loader',
+            options: {
+              cacheDirectory: cacheDir
+            }
+          },
+          'style-loader',
+          'css-loader',
+          'postcss-loader',
+          {
+            loader: 'sass-loader',
+            options: {
+              implementation: require('sass'),
+              sourceMap: false
+            }
+          }
+        ]
+      },
+      {
         test: /\.scss$/,
         use: [
           {
@@ -79,6 +110,7 @@ module.exports = {
           {
             loader: 'sass-loader',
             options: {
+              implementation: require('sass'),
               sourceMap: false
             }
           },
@@ -88,16 +120,6 @@ module.exports = {
               resources: path.join(process.cwd(), '/client/scss/global.scss')
             }
           }
-        ]
-      },
-      {
-        test: /\.styl$/,
-        use: [
-          'style-loader',
-          MiniCssExtractPlugin.loader,
-          'css-loader',
-          'postcss-loader',
-          'stylus-loader'
         ]
       },
       {
@@ -125,7 +147,7 @@ module.exports = {
       {
         test: /\.svg$/,
         exclude: [
-          path.join(process.cwd(), 'client/svg')
+          path.join(process.cwd(), 'node_modules/grapesjs')
         ],
         use: [
           {
@@ -138,17 +160,6 @@ module.exports = {
         ]
       },
       {
-        test: /\.svg$/,
-        include: [
-          path.join(process.cwd(), 'client/svg')
-        ],
-        use: [
-          {
-            loader: 'raw-loader'
-          }
-        ]
-      },
-      {
         test: /\.(graphql|gql)$/,
         exclude: /node_modules/,
         use: [
@@ -157,26 +168,38 @@ module.exports = {
         ]
       },
       {
-        test: /.jsx$/,
-        loader: 'babel-loader',
-        exclude: /node_modules/,
-        options: {
-          presets: ['es2015', 'react']
-        }
+        test: /\.(woff(2)?|ttf|eot|svg)(\?v=\d+\.\d+\.\d+)?$/,
+        exclude: [
+          path.join(process.cwd(), 'client')
+        ],
+        use: [{
+          loader: 'file-loader',
+          options: {
+            name: '[name].[ext]',
+            outputPath: 'fonts/'
+          }
+        }]
       },
       {
-        test: /\.flow$/,
-        loader: 'ignore-loader'
+        loader: 'webpack-modernizr-loader',
+        test: /\.modernizrrc\.js$/
       }
     ]
   },
   plugins: [
     new VueLoaderPlugin(),
+    new VuetifyLoaderPlugin(),
     new webpack.BannerPlugin('Wiki.js - wiki.js.org - Licensed under AGPL'),
-    new CopyWebpackPlugin([
-      { from: 'client/static' },
-      { from: './node_modules/graphql-voyager/dist/voyager.worker.js', to: 'js/' }
-    ], {}),
+    new MomentTimezoneDataPlugin({
+      startYear: 2017,
+      endYear: (new Date().getFullYear()) + 5
+    }),
+    new CopyWebpackPlugin({
+      patterns: [
+        { from: 'client/static' },
+        { from: './node_modules/prismjs/components', to: 'js/prism' }
+      ]
+    }),
     new MiniCssExtractPlugin({
       filename: 'css/bundle.[hash].css',
       chunkFilename: 'css/[name].[chunkhash].css'
@@ -185,47 +208,42 @@ module.exports = {
       template: 'dev/templates/master.pug',
       filename: '../server/views/master.pug',
       hash: false,
-      inject: 'head'
+      inject: false,
+      excludeChunks: ['setup', 'legacy']
+    }),
+    new HtmlWebpackPlugin({
+      template: 'dev/templates/legacy.pug',
+      filename: '../server/views/legacy/master.pug',
+      hash: false,
+      inject: false,
+      excludeChunks: ['setup', 'app']
+    }),
+    new HtmlWebpackPlugin({
+      template: 'dev/templates/setup.pug',
+      filename: '../server/views/setup.pug',
+      hash: false,
+      inject: false,
+      excludeChunks: ['app', 'legacy']
     }),
     new HtmlWebpackPugPlugin(),
     new ScriptExtHtmlWebpackPlugin({
       sync: 'runtime.js',
       defaultAttribute: 'async'
     }),
-    new SimpleProgressWebpackPlugin({
-      format: 'expanded'
+    new WebpackBarPlugin({
+      name: 'Client Assets'
     }),
-    new CleanWebpackPlugin([
-      'assets/js/*.*',
-      'assets/css/*.*',
-      'assets/*.js',
-      'assets/*.json'
-    ], {
-      root: process.cwd(),
-      verbose: false
-    }),
+    new CleanWebpackPlugin(),
     new OptimizeCssAssetsPlugin({
       cssProcessorOptions: { discardComments: { removeAll: true } },
       canPrint: true
     }),
-    new OfflinePlugin({
-      ServiceWorker: {
-        minify: false
-      },
-      publicPath: '/',
-      externals: ['/'],
-      caches: {
-        main: [
-          'js/client.js'
-        ],
-        additional: [
-          ':externals:'
-        ],
-        optional: [
-          'js/*.chunk.js'
-        ]
-      },
-      safeToUseOptionalCaches: true
+    new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify('production'),
+      'process.env.CURRENT_THEME': JSON.stringify(_.defaultTo(yargs.theme, 'default'))
+    }),
+    new webpack.optimize.MinChunkSizePlugin({
+      minChunkSize: 50000
     })
   ],
   optimization: {
@@ -244,16 +262,15 @@ module.exports = {
       '@': path.join(process.cwd(), 'client'),
       'vue$': 'vue/dist/vue.esm.js',
       'gql': path.join(process.cwd(), 'client/graph'),
-      'mdi': path.resolve(process.cwd(), 'node_modules/vue-material-design-icons'),
       // Duplicates fixes:
       'apollo-link': path.join(process.cwd(), 'node_modules/apollo-link'),
       'apollo-utilities': path.join(process.cwd(), 'node_modules/apollo-utilities'),
-      'uc.micro': path.join(process.cwd(), 'node_modules/uc.micro')
+      'uc.micro': path.join(process.cwd(), 'node_modules/uc.micro'),
+      'modernizr$': path.resolve(process.cwd(), 'client/.modernizrrc.js')
     },
     extensions: [
       '.js',
       '.json',
-      'jsx',
       '.vue'
     ],
     modules: [

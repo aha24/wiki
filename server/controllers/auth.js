@@ -1,114 +1,157 @@
 /* global WIKI */
 
-const Promise = require('bluebird')
 const express = require('express')
-const router = express.Router()
 const ExpressBrute = require('express-brute')
-const ExpressBruteRedisStore = require('express-brute-redis')
+const BruteKnex = require('../helpers/brute-knex')
+const router = express.Router()
 const moment = require('moment')
 const _ = require('lodash')
 
-/**
- * Setup Express-Brute
- */
-const EBstore = new ExpressBruteRedisStore({
-  client: WIKI.redis
-})
-const bruteforce = new ExpressBrute(EBstore, {
+const bruteforce = new ExpressBrute(new BruteKnex({
+  createTable: true,
+  knex: WIKI.models.knex
+}), {
   freeRetries: 5,
-  minWait: 60 * 1000,
-  maxWait: 5 * 60 * 1000,
-  refreshTimeoutOnRequest: false,
-  failCallback (req, res, next, nextValidRequestDate) {
-    req.flash('alert', {
-      class: 'error',
-      title: WIKI.lang.t('auth:errors.toomanyattempts'),
-      message: WIKI.lang.t('auth:errors.toomanyattemptsmsg', { time: moment(nextValidRequestDate).fromNow() }),
-      iconClass: 'fa-times'
-    })
-    res.redirect('/login')
+  minWait: 5 * 60 * 1000, // 5 minutes
+  maxWait: 60 * 60 * 1000, // 1 hour
+  failCallback: (req, res, next) => {
+    res.status(401).send('Too many failed attempts. Try again later.')
   }
 })
 
 /**
  * Login form
  */
-router.get('/login', function (req, res, next) {
-  res.render('main/login')
-})
+router.get('/login', async (req, res, next) => {
+  _.set(res.locals, 'pageMeta.title', 'Login')
 
-router.post('/login', bruteforce.prevent, function (req, res, next) {
-  new Promise((resolve, reject) => {
-    // [1] LOCAL AUTHENTICATION
-    WIKI.auth.passport.authenticate('local', function (err, user, info) {
-      if (err) { return reject(err) }
-      if (!user) { return reject(new Error('INVALID_LOGIN')) }
-      resolve(user)
-    })(req, res, next)
-  }).catch({ message: 'INVALID_LOGIN' }, err => {
-    if (_.has(WIKI.config.auth.strategy, 'ldap')) {
-      // [2] LDAP AUTHENTICATION
-      return new Promise((resolve, reject) => {
-        WIKI.auth.passport.authenticate('ldapauth', function (err, user, info) {
-          if (err) { return reject(err) }
-          if (info && info.message) { return reject(new Error(info.message)) }
-          if (!user) { return reject(new Error('INVALID_LOGIN')) }
-          resolve(user)
-        })(req, res, next)
-      })
-    } else {
-      throw err
+  if (req.query.legacy || (req.get('user-agent') && req.get('user-agent').indexOf('Trident') >= 0)) {
+    const { formStrategies, socialStrategies } = await WIKI.models.authentication.getStrategiesForLegacyClient()
+    res.render('legacy/login', {
+      err: false,
+      formStrategies,
+      socialStrategies
+    })
+  } else {
+    // -> Bypass Login
+    if (WIKI.config.auth.autoLogin && !req.query.all) {
+      const stg = await WIKI.models.authentication.query().orderBy('order').first()
+      const stgInfo = _.find(WIKI.data.authentication, ['key', stg.strategyKey])
+      if (!stgInfo.useForm) {
+        return res.redirect(`/login/${stg.key}`)
+      }
     }
-  }).then((user) => {
-    // LOGIN SUCCESS
-    return req.logIn(user, function (err) {
-      if (err) { return next(err) }
-      req.brute.reset(function () {
-        return res.redirect('/')
-      })
-    }) || true
-  }).catch(err => {
-    // LOGIN FAIL
-    if (err.message === 'INVALID_LOGIN') {
-      req.flash('alert', {
-        title: WIKI.lang.t('auth:errors.invalidlogin'),
-        message: WIKI.lang.t('auth:errors.invalidloginmsg')
-      })
-      return res.redirect('/login')
-    } else {
-      req.flash('alert', {
-        title: WIKI.lang.t('auth:errors.loginerror'),
-        message: err.message
-      })
-      return res.redirect('/login')
-    }
-  })
+    // -> Show Login
+    const bgUrl = !_.isEmpty(WIKI.config.auth.loginBgUrl) ? WIKI.config.auth.loginBgUrl : '/_assets/img/splash/1.jpg'
+    res.render('login', { bgUrl, hideLocal: WIKI.config.auth.hideLocal })
+  }
 })
 
 /**
- * Social Login
+ * Social Strategies Login
  */
+router.get('/login/:strategy', async (req, res, next) => {
+  try {
+    await WIKI.models.users.login({
+      strategy: req.params.strategy
+    }, { req, res })
+  } catch (err) {
+    next(err)
+  }
+})
 
-router.get('/login/ms', WIKI.auth.passport.authenticate('windowslive', { scope: ['wl.signin', 'wl.basic', 'wl.emails'] }))
-router.get('/login/google', WIKI.auth.passport.authenticate('google', { scope: ['profile', 'email'] }))
-router.get('/login/facebook', WIKI.auth.passport.authenticate('facebook', { scope: ['public_profile', 'email'] }))
-router.get('/login/github', WIKI.auth.passport.authenticate('github', { scope: ['user:email'] }))
-router.get('/login/slack', WIKI.auth.passport.authenticate('slack', { scope: ['identity.basic', 'identity.email'] }))
-router.get('/login/azure', WIKI.auth.passport.authenticate('azure_ad_oauth2'))
+/**
+ * Social Strategies Callback
+ */
+router.all('/login/:strategy/callback', async (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'POST') { return next() }
 
-router.get('/login/ms/callback', WIKI.auth.passport.authenticate('windowslive', { failureRedirect: '/login', successRedirect: '/' }))
-router.get('/login/google/callback', WIKI.auth.passport.authenticate('google', { failureRedirect: '/login', successRedirect: '/' }))
-router.get('/login/facebook/callback', WIKI.auth.passport.authenticate('facebook', { failureRedirect: '/login', successRedirect: '/' }))
-router.get('/login/github/callback', WIKI.auth.passport.authenticate('github', { failureRedirect: '/login', successRedirect: '/' }))
-router.get('/login/slack/callback', WIKI.auth.passport.authenticate('slack', { failureRedirect: '/login', successRedirect: '/' }))
-router.get('/login/azure/callback', WIKI.auth.passport.authenticate('azure_ad_oauth2', { failureRedirect: '/login', successRedirect: '/' }))
+  try {
+    const authResult = await WIKI.models.users.login({
+      strategy: req.params.strategy
+    }, { req, res })
+    res.cookie('jwt', authResult.jwt, { expires: moment().add(1, 'y').toDate() })
+    res.redirect('/')
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * LEGACY - Login form handling
+ */
+router.post('/login', bruteforce.prevent, async (req, res, next) => {
+  _.set(res.locals, 'pageMeta.title', 'Login')
+
+  if (req.query.legacy || req.get('user-agent').indexOf('Trident') >= 0) {
+    try {
+      const authResult = await WIKI.models.users.login({
+        strategy: req.body.strategy,
+        username: req.body.user,
+        password: req.body.pass
+      }, { req, res })
+      req.brute.reset()
+      res.cookie('jwt', authResult.jwt, { expires: moment().add(1, 'y').toDate() })
+      res.redirect('/')
+    } catch (err) {
+      const { formStrategies, socialStrategies } = await WIKI.models.authentication.getStrategiesForLegacyClient()
+      res.render('legacy/login', {
+        err,
+        formStrategies,
+        socialStrategies
+      })
+    }
+  } else {
+    res.redirect('/login')
+  }
+})
 
 /**
  * Logout
  */
 router.get('/logout', function (req, res) {
   req.logout()
+  res.clearCookie('jwt')
   res.redirect('/')
+})
+
+/**
+ * Register form
+ */
+router.get('/register', async (req, res, next) => {
+  _.set(res.locals, 'pageMeta.title', 'Register')
+  const localStrg = await WIKI.models.authentication.getStrategy('local')
+  if (localStrg.selfRegistration) {
+    res.render('register')
+  } else {
+    next(new WIKI.Error.AuthRegistrationDisabled())
+  }
+})
+
+/**
+ * Verify
+ */
+router.get('/verify/:token', bruteforce.prevent, async (req, res, next) => {
+  try {
+    const usr = await WIKI.models.userKeys.validateToken({ kind: 'verify', token: req.params.token })
+    await WIKI.models.users.query().patch({ isVerified: true }).where('id', usr.id)
+    const result = await WIKI.models.users.refreshToken(usr)
+    req.brute.reset()
+    res.cookie('jwt', result.token, { expires: moment().add(1, 'years').toDate() })
+    res.redirect('/')
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * JWT Public Endpoints
+ */
+router.get('/.well-known/jwk.json', function (req, res, next) {
+  res.json(WIKI.config.certs.jwk)
+})
+router.get('/.well-known/jwk.pem', function (req, res, next) {
+  res.send(WIKI.config.certs.public)
 })
 
 module.exports = router

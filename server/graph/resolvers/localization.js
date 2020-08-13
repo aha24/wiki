@@ -12,9 +12,9 @@ module.exports = {
   },
   LocalizationQuery: {
     async locales(obj, args, context, info) {
-      let remoteLocales = await WIKI.redis.get('locales')
-      let localLocales = await WIKI.db.locales.query().select('id', 'code', 'isRTL', 'name', 'nativeName', 'createdAt', 'updatedAt')
-      remoteLocales = (remoteLocales) ? JSON.parse(remoteLocales) : localLocales
+      let remoteLocales = await WIKI.cache.get('locales')
+      let localLocales = await WIKI.models.locales.query().select('code', 'isRTL', 'name', 'nativeName', 'createdAt', 'updatedAt', 'availability')
+      remoteLocales = remoteLocales || localLocales
       return _.map(remoteLocales, rl => {
         let isInstalled = _.some(localLocales, ['code', rl.code])
         return {
@@ -31,17 +31,19 @@ module.exports = {
         namespacing: WIKI.config.lang.namespacing,
         namespaces: WIKI.config.lang.namespaces
       }
+    },
+    translations (obj, args, context, info) {
+      return WIKI.lang.getByNamespace(args.locale, args.namespace)
     }
   },
   LocalizationMutation: {
     async downloadLocale(obj, args, context) {
       try {
-        const job = await WIKI.queue.job.fetchGraphLocale.add({
-          locale: args.locale
-        }, {
-          timeout: 30000
-        })
-        await job.finished()
+        const job = await WIKI.scheduler.registerJob({
+          name: 'fetch-graph-locale',
+          immediate: true
+        }, args.locale)
+        await job.finished
         return {
           responseResult: graphHelper.generateSuccess('Locale downloaded successfully')
         }
@@ -54,11 +56,17 @@ module.exports = {
         WIKI.config.lang.code = args.locale
         WIKI.config.lang.autoUpdate = args.autoUpdate
         WIKI.config.lang.namespacing = args.namespacing
-        WIKI.config.lang.namespaces = args.namespaces
+        WIKI.config.lang.namespaces = _.union(args.namespaces, [args.locale])
+
+        const newLocale = await WIKI.models.locales.query().select('isRTL').where('code', args.locale).first()
+        WIKI.config.lang.rtl = newLocale.isRTL
+
         await WIKI.configSvc.saveToDb(['lang'])
 
         await WIKI.lang.setCurrentLocale(args.locale)
         await WIKI.lang.refreshNamespaces()
+
+        await WIKI.cache.del('nav:locales')
 
         return {
           responseResult: graphHelper.generateSuccess('Locale config updated')

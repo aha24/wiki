@@ -1,13 +1,26 @@
 query {
   storage {
-    targets(orderBy: "title ASC") {
+    targets {
+      isAvailable
       isEnabled
       key
       title
+      description
+      logo
+      website
+      supportedModes
       mode
+      hasSchedule
+      syncInterval
+      syncIntervalDefault
       config {
         key
         value
+      }
+      actions {
+        handler
+        label
+        hint
       }
     }
   }

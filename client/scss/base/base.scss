@@ -1,7 +1,7 @@
 html {
   box-sizing: border-box;
-  font-family: $core-font-standard;
   height: 100%;
+  overflow-y: auto !important;
 }
 *, *:before, *:after {
   box-sizing: inherit;
@@ -11,7 +11,7 @@ html {
   display: none;
 }
 
-#app {
+#root {
   position: relative;
   min-height: 100%;
 
@@ -20,66 +20,67 @@ html {
   }
 }
 
-// Container
+.v-application--wrap {
+  transition: all 1.2s ease;
+  transform-origin: 50% 50%;
+  // background-color: #FFF;
 
-.container {
-  position: relative;
-}
-
-.content {
-	padding: 20px;
-}
-
-.datatable {
-  th, td {
-    vertical-align: middle;
+  @at-root .theme--dark & {
+    background-color: mc('grey', '900');
   }
 }
 
-// Visibility
-
-.is-hidden {
-  display: none !important;
-}
-
-.is-hidden-mobile {
-  @include mobile {
-    display: none !important;
+#root .v-application {
+  .overline {
+    line-height: 1rem;
+    font-size: .625rem!important;
+    font-weight: 400;
+    letter-spacing: .1666666667em!important;
   }
-}
 
-.is-hidden-tablet {
-  @include tablet {
-    display: none !important;
+  @for $i from 0 through 25 {
+    .radius-#{$i} {
+      border-radius: #{$i}px;
+    }
   }
-}
 
-.is-hidden-tablet-only {
-  @include tablet-only {
-    display: none !important;
+  @for $i from 1 through 5 {
+    .grey.darken-2-d#{$i} {
+      background-color: darken(mc('grey', '700'), percentage($i/100)) !important;
+      border-color: darken(mc('grey', '700'), percentage($i/100)) !important;
+    }
+    .grey.darken-2-l#{$i} {
+      background-color: lighten(mc('grey', '700'), percentage($i/100)) !important;
+      border-color: lighten(mc('grey', '700'), percentage($i/100)) !important;
+    }
+    .grey.darken-3-d#{$i} {
+      background-color: darken(mc('grey', '800'), percentage($i/100)) !important;
+      border-color: darken(mc('grey', '800'), percentage($i/100)) !important;
+    }
+    .grey.darken-3-l#{$i} {
+      background-color: lighten(mc('grey', '800'), percentage($i/100)) !important;
+      border-color: lighten(mc('grey', '800'), percentage($i/100)) !important;
+    }
+    .grey.darken-4-d#{$i} {
+      background-color: darken(mc('grey', '900'), percentage($i/100)) !important;
+      border-color: darken(mc('grey', '900'), percentage($i/100)) !important;
+    }
+    .grey.darken-4-l#{$i} {
+      background-color: lighten(mc('grey', '900'), percentage($i/100)) !important;
+      border-color: lighten(mc('grey', '900'), percentage($i/100)) !important;
+    }
   }
-}
-
-.is-hidden-touch {
-  @include touch {
-    display: none !important;
+  .grey.darken-5 {
+    background-color: #0C0C0C !important;
+    border-color: #0C0C0C !important;
   }
-}
 
-.is-hidden-desktop {
-  @include desktop {
-    display: none !important;
+  .blue.darken-5 {
+    background-color: darken(mc('blue', '900'), 20%) !important;
+    border-color: darken(mc('blue', '900'), 20%) !important;
   }
-}
-
-.is-hidden-desktop-only {
-  @include desktop-only {
-    display: none !important;
-  }
-}
-
-.is-hidden-widescreen {
-  @include widescreen {
-    display: none !important;
+  .indigo.darken-5 {
+    background-color: darken(mc('indigo', '900'), 10%) !important;
+    border-color: darken(mc('indigo', '900'), 10%) !important;
   }
 }

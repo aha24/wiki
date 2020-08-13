@@ -1,4 +1,6 @@
 const graphHelper = require('../../helpers/graph')
+const safeRegex = require('safe-regex')
+const _ = require('lodash')
 
 /* global WIKI */
 
@@ -13,61 +15,110 @@ module.exports = {
   },
   GroupQuery: {
     async list(obj, args, context, info) {
-      return WIKI.db.groups.query().select(
+      return WIKI.models.groups.query().select(
         'groups.*',
-        WIKI.db.groups.relatedQuery('users').count().as('userCount')
+        WIKI.models.groups.relatedQuery('users').count().as('userCount')
       )
     },
     async single(obj, args, context, info) {
-      return WIKI.db.groups.query().findById(args.id)
+      return WIKI.models.groups.query().findById(args.id)
     }
   },
   GroupMutation: {
     async assignUser(obj, args) {
-      const grp = await WIKI.db.groups.query().findById(args.groupId)
+      const grp = await WIKI.models.groups.query().findById(args.groupId)
       if (!grp) {
         throw new gql.GraphQLError('Invalid Group ID')
       }
-      const usr = await WIKI.db.users.query().findById(args.userId)
+      const usr = await WIKI.models.users.query().findById(args.userId)
       if (!usr) {
         throw new gql.GraphQLError('Invalid User ID')
       }
+      const relExist = await WIKI.models.knex('userGroups').where({
+        userId: args.userId,
+        groupId: args.groupId
+      }).first()
+      if (relExist) {
+        throw new gql.GraphQLError('User is already assigned to group.')
+      }
       await grp.$relatedQuery('users').relate(usr.id)
+
+      WIKI.auth.revokeUserTokens({ id: usr.id, kind: 'u' })
+      WIKI.events.outbound.emit('addAuthRevoke', { id: usr.id, kind: 'u' })
+
       return {
         responseResult: graphHelper.generateSuccess('User has been assigned to group.')
       }
     },
     async create(obj, args) {
-      const group = await WIKI.db.groups.query().insertAndFetch({
-        name: args.name
+      const group = await WIKI.models.groups.query().insertAndFetch({
+        name: args.name,
+        permissions: JSON.stringify(WIKI.data.groups.defaultPermissions),
+        pageRules: JSON.stringify(WIKI.data.groups.defaultPageRules),
+        isSystem: false
       })
+      await WIKI.auth.reloadGroups()
+      WIKI.events.outbound.emit('reloadGroups')
       return {
         responseResult: graphHelper.generateSuccess('Group created successfully.'),
         group
       }
     },
     async delete(obj, args) {
-      await WIKI.db.groups.query().deleteById(args.id)
+      await WIKI.models.groups.query().deleteById(args.id)
+
+      WIKI.auth.revokeUserTokens({ id: args.id, kind: 'g' })
+      WIKI.events.outbound.emit('addAuthRevoke', { id: args.id, kind: 'g' })
+
+      await WIKI.auth.reloadGroups()
+      WIKI.events.outbound.emit('reloadGroups')
+
       return {
         responseResult: graphHelper.generateSuccess('Group has been deleted.')
       }
     },
     async unassignUser(obj, args) {
-      const grp = await WIKI.db.groups.query().findById(args.groupId)
+      const grp = await WIKI.models.groups.query().findById(args.groupId)
       if (!grp) {
         throw new gql.GraphQLError('Invalid Group ID')
       }
-      const usr = await WIKI.db.users.query().findById(args.userId)
+      const usr = await WIKI.models.users.query().findById(args.userId)
       if (!usr) {
         throw new gql.GraphQLError('Invalid User ID')
       }
       await grp.$relatedQuery('users').unrelate().where('userId', usr.id)
+
+      WIKI.auth.revokeUserTokens({ id: usr.id, kind: 'u' })
+      WIKI.events.outbound.emit('addAuthRevoke', { id: usr.id, kind: 'u' })
+
       return {
         responseResult: graphHelper.generateSuccess('User has been unassigned from group.')
       }
     },
     async update(obj, args) {
-      await WIKI.db.groups.query().patch({ name: args.name }).where('id', args.id)
+      if (_.some(args.pageRules, pr => {
+        return pr.match === 'REGEX' && !safeRegex(pr.path)
+      })) {
+        throw new gql.GraphQLError('Some Page Rules contains unsafe or exponential time regex.')
+      }
+
+      if (_.isEmpty(args.redirectOnLogin)) {
+        args.redirectOnLogin = '/'
+      }
+
+      await WIKI.models.groups.query().patch({
+        name: args.name,
+        redirectOnLogin: args.redirectOnLogin,
+        permissions: JSON.stringify(args.permissions),
+        pageRules: JSON.stringify(args.pageRules)
+      }).where('id', args.id)
+
+      WIKI.auth.revokeUserTokens({ id: args.id, kind: 'g' })
+      WIKI.events.outbound.emit('addAuthRevoke', { id: args.id, kind: 'g' })
+
+      await WIKI.auth.reloadGroups()
+      WIKI.events.outbound.emit('reloadGroups')
+
       return {
         responseResult: graphHelper.generateSuccess('Group has been updated.')
       }

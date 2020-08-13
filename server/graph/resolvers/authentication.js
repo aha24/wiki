@@ -3,46 +3,118 @@ const fs = require('fs-extra')
 const path = require('path')
 const graphHelper = require('../../helpers/graph')
 
-// const getFieldNames = require('graphql-list-fields')
-
 /* global WIKI */
 
 module.exports = {
   Query: {
-    async authentication() { return {} }
+    async authentication () { return {} }
   },
   Mutation: {
-    async authentication() { return {} }
+    async authentication () { return {} }
   },
   AuthenticationQuery: {
-    async strategies(obj, args, context, info) {
-      let strategies = await WIKI.db.authentication.getStrategies()
-      strategies = strategies.map(stg => ({
-        ...stg,
-        config: _.transform(stg.config, (res, value, key) => {
-          res.push({ key, value })
-        }, [])
+    /**
+     * List of API Keys
+     */
+    async apiKeys (obj, args, context) {
+      const keys = await WIKI.models.apiKeys.query().orderBy(['isRevoked', 'name'])
+      return keys.map(k => ({
+        id: k.id,
+        name: k.name,
+        keyShort: '...' + k.key.substring(k.key.length - 20),
+        isRevoked: k.isRevoked,
+        expiration: k.expiration,
+        createdAt: k.createdAt,
+        updatedAt: k.updatedAt
       }))
-      if (args.filter) { strategies = graphHelper.filter(strategies, args.filter) }
-      if (args.orderBy) { strategies = graphHelper.orderBy(strategies, args.orderBy) }
+    },
+    /**
+     * Current API State
+     */
+    apiState () {
+      return WIKI.config.api.isEnabled
+    },
+    async strategies () {
+      return WIKI.data.authentication.map(stg => ({
+        ...stg,
+        isAvailable: stg.isAvailable === true,
+        props: _.sortBy(_.transform(stg.props, (res, value, key) => {
+          res.push({
+            key,
+            value: JSON.stringify(value)
+          })
+        }, []), 'key')
+      }))
+    },
+    /**
+     * Fetch active authentication strategies
+     */
+    async activeStrategies (obj, args, context, info) {
+      let strategies = await WIKI.models.authentication.getStrategies()
+      strategies = strategies.map(stg => {
+        const strategyInfo = _.find(WIKI.data.authentication, ['key', stg.strategyKey]) || {}
+        return {
+          ...stg,
+          strategy: strategyInfo,
+          config: _.sortBy(_.transform(stg.config, (res, value, key) => {
+            const configData = _.get(strategyInfo.props, key, false)
+            if (configData) {
+              res.push({
+                key,
+                value: JSON.stringify({
+                  ...configData,
+                  value
+                })
+              })
+            }
+          }, []), 'key')
+        }
+      })
       return strategies
     }
   },
   AuthenticationMutation: {
-    async login(obj, args, context) {
+    /**
+     * Create New API Key
+     */
+    async createApiKey (obj, args, context) {
       try {
-        let authResult = await WIKI.db.users.login(args, context)
+        const key = await WIKI.models.apiKeys.createNewKey(args)
+        await WIKI.auth.reloadApiKeys()
+        WIKI.events.outbound.emit('reloadApiKeys')
         return {
-          ...authResult,
-          responseResult: graphHelper.generateSuccess('Login success')
+          key,
+          responseResult: graphHelper.generateSuccess('API Key created successfully')
         }
       } catch (err) {
         return graphHelper.generateError(err)
       }
     },
-    async loginTFA(obj, args, context) {
+    /**
+     * Perform Login
+     */
+    async login (obj, args, context) {
       try {
-        let authResult = await WIKI.db.users.loginTFA(args, context)
+        const authResult = await WIKI.models.users.login(args, context)
+        return {
+          ...authResult,
+          responseResult: graphHelper.generateSuccess('Login success')
+        }
+      } catch (err) {
+        // LDAP Debug Flag
+        if (args.strategy === 'ldap' && WIKI.config.flags.ldapdebug) {
+          WIKI.logger.warn('LDAP LOGIN ERROR (c1): ', err)
+        }
+
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Perform 2FA Login
+     */
+    async loginTFA (obj, args, context) {
+      try {
+        const authResult = await WIKI.models.users.loginTFA(args, context)
         return {
           ...authResult,
           responseResult: graphHelper.generateSuccess('TFA success')
@@ -51,22 +123,144 @@ module.exports = {
         return graphHelper.generateError(err)
       }
     },
-    async updateStrategies(obj, args, context) {
+    /**
+     * Perform Mandatory Password Change after Login
+     */
+    async loginChangePassword (obj, args, context) {
       try {
-        for (let str of args.strategies) {
-          await WIKI.db.authentication.query().patch({
-            isEnabled: str.isEnabled,
+        const authResult = await WIKI.models.users.loginChangePassword(args, context)
+        return {
+          ...authResult,
+          responseResult: graphHelper.generateSuccess('Password changed successfully')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Register a new account
+     */
+    async register (obj, args, context) {
+      try {
+        await WIKI.models.users.register({ ...args, verify: true }, context)
+        return {
+          responseResult: graphHelper.generateSuccess('Registration success')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Set API state
+     */
+    async setApiState (obj, args, context) {
+      try {
+        WIKI.config.api.isEnabled = args.enabled
+        await WIKI.configSvc.saveToDb(['api'])
+        return {
+          responseResult: graphHelper.generateSuccess('API State changed successfully')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Revoke an API key
+     */
+    async revokeApiKey (obj, args, context) {
+      try {
+        await WIKI.models.apiKeys.query().findById(args.id).patch({
+          isRevoked: true
+        })
+        await WIKI.auth.reloadApiKeys()
+        WIKI.events.outbound.emit('reloadApiKeys')
+        return {
+          responseResult: graphHelper.generateSuccess('API Key revoked successfully')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Update Authentication Strategies
+     */
+    async updateStrategies (obj, args, context) {
+      try {
+        // WIKI.config.auth = {
+        //   audience: _.get(args, 'config.audience', WIKI.config.auth.audience),
+        //   tokenExpiration: _.get(args, 'config.tokenExpiration', WIKI.config.auth.tokenExpiration),
+        //   tokenRenewal: _.get(args, 'config.tokenRenewal', WIKI.config.auth.tokenRenewal)
+        // }
+        // await WIKI.configSvc.saveToDb(['auth'])
+
+        const previousStrategies = await WIKI.models.authentication.getStrategies()
+        for (const str of args.strategies) {
+          const newStr = {
+            displayName: str.displayName,
+            order: str.order,
             config: _.reduce(str.config, (result, value, key) => {
-              _.set(result, value.key, value.value)
+              _.set(result, `${value.key}`, _.get(JSON.parse(value.value), 'v', null))
               return result
             }, {}),
             selfRegistration: str.selfRegistration,
             domainWhitelist: { v: str.domainWhitelist },
             autoEnrollGroups: { v: str.autoEnrollGroups }
-          }).where('key', str.key)
+          }
+
+          if (_.some(previousStrategies, ['key', str.key])) {
+            await WIKI.models.authentication.query().patch({
+              key: str.key,
+              strategyKey: str.strategyKey,
+              ...newStr
+            }).where('key', str.key)
+          } else {
+            await WIKI.models.authentication.query().insert({
+              key: str.key,
+              strategyKey: str.strategyKey,
+              ...newStr
+            })
+          }
         }
+
+        for (const str of _.differenceBy(previousStrategies, args.strategies, 'key')) {
+          const hasUsers = await WIKI.models.users.query().count('* as total').where({ providerKey: str.key }).first()
+          if (_.toSafeInteger(hasUsers.total) > 0) {
+            throw new Error(`Cannot delete ${str.displayName} as 1 or more users are still using it.`)
+          } else {
+            await WIKI.models.authentication.query().delete().where('key', str.key)
+          }
+        }
+
+        await WIKI.auth.activateStrategies()
+        WIKI.events.outbound.emit('reloadAuthStrategies')
         return {
           responseResult: graphHelper.generateSuccess('Strategies updated successfully')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Generate New Authentication Public / Private Key Certificates
+     */
+    async regenerateCertificates (obj, args, context) {
+      try {
+        await WIKI.auth.regenerateCertificates()
+        return {
+          responseResult: graphHelper.generateSuccess('Certificates have been regenerated successfully.')
+        }
+      } catch (err) {
+        return graphHelper.generateError(err)
+      }
+    },
+    /**
+     * Reset Guest User
+     */
+    async resetGuestUser (obj, args, context) {
+      try {
+        await WIKI.auth.resetGuestUser()
+        return {
+          responseResult: graphHelper.generateSuccess('Guest user has been reset successfully.')
         }
       } catch (err) {
         return graphHelper.generateError(err)

@@ -1,4 +1,16 @@
 const path = require('path')
+const { v4: uuid } = require('uuid')
+const bodyParser = require('body-parser')
+const compression = require('compression')
+const express = require('express')
+const favicon = require('serve-favicon')
+const http = require('http')
+const Promise = require('bluebird')
+const fs = require('fs-extra')
+const _ = require('lodash')
+const crypto = Promise.promisifyAll(require('crypto'))
+const pem2jwk = require('pem-jwk').pem2jwk
+const semver = require('semver')
 
 /* global WIKI */
 
@@ -9,23 +21,6 @@ module.exports = () => {
   }
 
   WIKI.system = require('./core/system')
-
-  // ----------------------------------------
-  // Load modules
-  // ----------------------------------------
-
-  const bodyParser = require('body-parser')
-  const compression = require('compression')
-  const express = require('express')
-  const favicon = require('serve-favicon')
-  const http = require('http')
-  const Promise = require('bluebird')
-  const fs = Promise.promisifyAll(require('fs-extra'))
-  const yaml = require('js-yaml')
-  const _ = require('lodash')
-  const cfgHelper = require('./helpers/config')
-  const filesize = require('filesize.js')
-  const crypto = Promise.promisifyAll(require('crypto'))
 
   // ----------------------------------------
   // Define Express App
@@ -39,7 +34,7 @@ module.exports = () => {
   // ----------------------------------------
 
   app.use(favicon(path.join(WIKI.ROOTPATH, 'assets', 'favicon.ico')))
-  app.use(express.static(path.join(WIKI.ROOTPATH, 'assets')))
+  app.use('/_assets', express.static(path.join(WIKI.ROOTPATH, 'assets')))
 
   // ----------------------------------------
   // View Engine Setup
@@ -54,6 +49,7 @@ module.exports = () => {
   app.locals.config = WIKI.config
   app.locals.data = WIKI.data
   app.locals._ = require('lodash')
+  app.locals.devMode = WIKI.devMode
 
   // ----------------------------------------
   // HMR (Dev Mode Only)
@@ -70,300 +66,293 @@ module.exports = () => {
 
   app.get('*', async (req, res) => {
     let packageObj = await fs.readJson(path.join(WIKI.ROOTPATH, 'package.json'))
-    res.render('main/setup', {
-      packageObj,
-      telemetryClientID: WIKI.telemetry.cid
-    })
-  })
-
-  /**
-   * Perform basic system checks
-   */
-  app.post('/syscheck', (req, res) => {
-    WIKI.telemetry.enabled = (req.body.telemetry === true)
-    WIKI.telemetry.sendEvent('setup', 'start')
-
-    Promise.mapSeries([
-      () => {
-        const semver = require('semver')
-        if (!semver.satisfies(semver.clean(process.version), '>=8.9.0')) {
-          throw new Error('Node.js version is too old. Minimum is 8.9.0.')
-        }
-        return {
-          title: 'Node.js ' + process.version + ' detected.',
-          subtitle: ' Minimum is 8.9.0.'
-        }
-      },
-      () => {
-        return Promise.try(() => {
-          require('crypto')
-        }).catch(err => {
-          throw new Error('Crypto Node.js module is not available.')
-        }).return({
-          title: 'Node.js Crypto module is available.',
-          subtitle: 'Crypto module is required.'
-        })
-      },
-      () => {
-        const exec = require('child_process').exec
-        const semver = require('semver')
-        return new Promise((resolve, reject) => {
-          exec('git --version', (err, stdout, stderr) => {
-            if (err || stdout.length < 3) {
-              reject(new Error('Git is not installed or not reachable from PATH.'))
-            }
-            let gitver = _.head(stdout.match(/[\d]+\.[\d]+(\.[\d]+)?/gi))
-            if (!gitver || !semver.satisfies(semver.clean(gitver), '>=2.7.4')) {
-              reject(new Error('Git version is too old. Minimum is 2.7.4.'))
-            }
-            resolve({
-              title: 'Git ' + gitver + ' detected.',
-              subtitle: 'Minimum is 2.7.4.'
-            })
-          })
-        })
-      },
-      () => {
-        const os = require('os')
-        if (os.totalmem() < 1000 * 1000 * 768) {
-          throw new Error('Not enough memory. Minimum is 768 MB.')
-        }
-        return {
-          title: filesize(os.totalmem()) + ' of system memory available.',
-          subtitle: 'Minimum is 768 MB.'
-        }
-      },
-      () => {
-        let fs = require('fs')
-        return Promise.try(() => {
-          fs.accessSync(path.join(WIKI.ROOTPATH, 'config.yml'), (fs.constants || fs).W_OK)
-        }).catch(err => {
-          throw new Error('config.yml file is not writable by Node.js process or was not created properly.')
-        }).return({
-          title: 'config.yml is writable by the setup process.',
-          subtitle: 'Setup will write to this file.'
-        })
-      }
-    ], test => test()).then(results => {
-      res.json({ ok: true, results })
-    }).catch(err => {
-      res.json({ ok: false, error: err.message })
-    })
-  })
-
-  /**
-   * Check the Git connection
-   */
-  app.post('/gitcheck', (req, res) => {
-    WIKI.telemetry.sendEvent('setup', 'gitcheck')
-
-    const exec = require('execa')
-    const url = require('url')
-
-    const dataDir = path.resolve(WIKI.ROOTPATH, cfgHelper.parseConfigValue(req.body.pathData))
-    const gitDir = path.resolve(WIKI.ROOTPATH, cfgHelper.parseConfigValue(req.body.pathRepo))
-
-    let gitRemoteUrl = ''
-
-    if (req.body.gitUseRemote === true) {
-      let urlObj = url.parse(cfgHelper.parseConfigValue(req.body.gitUrl))
-      if (req.body.gitAuthType === 'basic') {
-        urlObj.auth = req.body.gitAuthUser + ':' + req.body.gitAuthPass
-      }
-      gitRemoteUrl = url.format(urlObj)
-    }
-
-    Promise.mapSeries([
-      () => {
-        return fs.ensureDir(dataDir).then(() => 'Data directory path is valid.')
-      },
-      () => {
-        return fs.ensureDir(gitDir).then(() => 'Git directory path is valid.')
-      },
-      () => {
-        return exec.stdout('git', ['init'], { cwd: gitDir }).then(result => {
-          return 'Local git repository has been initialized.'
-        })
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        return exec.stdout('git', ['config', '--local', 'user.name', 'Wiki'], { cwd: gitDir }).then(result => {
-          return 'Git Signature Name has been set successfully.'
-        })
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        return exec.stdout('git', ['config', '--local', 'user.email', req.body.gitServerEmail], { cwd: gitDir }).then(result => {
-          return 'Git Signature Name has been set successfully.'
-        })
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        return exec.stdout('git', ['config', '--local', '--bool', 'http.sslVerify', req.body.gitAuthSSL], { cwd: gitDir }).then(result => {
-          return 'Git SSL Verify flag has been set successfully.'
-        })
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        if (_.includes(['sshenv', 'sshdb'], req.body.gitAuthType)) {
-          req.body.gitAuthSSHKey = path.join(dataDir, 'ssh/key.pem')
-        }
-        if (_.startsWith(req.body.gitAuthType, 'ssh')) {
-          return exec.stdout('git', ['config', '--local', 'core.sshCommand', 'ssh -i "' + req.body.gitAuthSSHKey + '" -o StrictHostKeyChecking=no'], { cwd: gitDir }).then(result => {
-            return 'Git SSH Private Key path has been set successfully.'
-          })
-        } else {
-          return false
-        }
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        return exec.stdout('git', ['remote', 'rm', 'origin'], { cwd: gitDir }).catch(err => {
-          if (_.includes(err.message, 'No such remote') || _.includes(err.message, 'Could not remove')) {
-            return true
-          } else {
-            throw err
-          }
-        }).then(() => {
-          return exec.stdout('git', ['remote', 'add', 'origin', gitRemoteUrl], { cwd: gitDir }).then(result => {
-            return 'Git Remote was added successfully.'
-          })
-        })
-      },
-      () => {
-        if (req.body.gitUseRemote === false) { return false }
-        return exec.stdout('git', ['pull', 'origin', req.body.gitBranch], { cwd: gitDir }).then(result => {
-          return 'Git Pull operation successful.'
-        })
-      }
-    ], step => { return step() }).then(results => {
-      return res.json({ ok: true, results: _.without(results, false) })
-    }).catch(err => {
-      let errMsg = (err.stderr) ? err.stderr.replace(/(error:|warning:|fatal:)/gi, '').replace(/ \s+/g, ' ') : err.message
-      res.json({ ok: false, error: errMsg })
-    })
+    res.render('setup', { packageObj })
   })
 
   /**
    * Finalize
    */
   app.post('/finalize', async (req, res) => {
-    WIKI.telemetry.sendEvent('setup', 'finalize')
-
     try {
-      // Upgrade from WIKI.js 1.x?
-      if (req.body.upgrade) {
-        await WIKI.system.upgradeFromMongo({
-          mongoCnStr: cfgHelper.parseConfigValue(req.body.upgMongo)
-        })
+      // Set config
+      _.set(WIKI.config, 'auth', {
+        audience: 'urn:wiki.js',
+        tokenExpiration: '30m',
+        tokenRenewal: '14d'
+      })
+      _.set(WIKI.config, 'company', '')
+      _.set(WIKI.config, 'features', {
+        featurePageRatings: true,
+        featurePageComments: true,
+        featurePersonalWikis: true
+      })
+      _.set(WIKI.config, 'graphEndpoint', 'https://graph.requarks.io')
+      _.set(WIKI.config, 'host', req.body.siteUrl)
+      _.set(WIKI.config, 'lang', {
+        code: 'en',
+        autoUpdate: true,
+        namespacing: false,
+        namespaces: []
+      })
+      _.set(WIKI.config, 'logo', {
+        hasLogo: false,
+        logoIsSquare: false
+      })
+      _.set(WIKI.config, 'mail', {
+        senderName: '',
+        senderEmail: '',
+        host: '',
+        port: 465,
+        secure: true,
+        verifySSL: true,
+        user: '',
+        pass: '',
+        useDKIM: false,
+        dkimDomainName: '',
+        dkimKeySelector: '',
+        dkimPrivateKey: ''
+      })
+      _.set(WIKI.config, 'seo', {
+        description: '',
+        robots: ['index', 'follow'],
+        analyticsService: '',
+        analyticsId: ''
+      })
+      _.set(WIKI.config, 'sessionSecret', (await crypto.randomBytesAsync(32)).toString('hex'))
+      _.set(WIKI.config, 'telemetry', {
+        isEnabled: req.body.telemetry === true,
+        clientId: uuid()
+      })
+      _.set(WIKI.config, 'theming', {
+        theme: 'default',
+        darkMode: false,
+        iconset: 'mdi',
+        injectCSS: '',
+        injectHead: '',
+        injectBody: ''
+      })
+      _.set(WIKI.config, 'title', 'Wiki.js')
+
+      // Init Telemetry
+      WIKI.kernel.initTelemetry()
+      // WIKI.telemetry.sendEvent('setup', 'install-start')
+
+      // Basic checks
+      if (!semver.satisfies(process.version, '>=10.12')) {
+        throw new Error('Node.js 10.12.x or later required!')
       }
 
-      // Update config file
-      WIKI.logger.info('Writing config file to disk...')
-      let confRaw = await fs.readFileAsync(path.join(WIKI.ROOTPATH, 'config.yml'), 'utf8')
-      let conf = yaml.safeLoad(confRaw)
+      // Create directory structure
+      WIKI.logger.info('Creating data directories...')
+      await fs.ensureDir(path.resolve(WIKI.ROOTPATH, WIKI.config.dataPath))
+      await fs.emptyDir(path.resolve(WIKI.ROOTPATH, WIKI.config.dataPath, 'cache'))
+      await fs.ensureDir(path.resolve(WIKI.ROOTPATH, WIKI.config.dataPath, 'uploads'))
 
-      conf.port = req.body.port
-      conf.paths.data = req.body.pathData
-      conf.paths.content = req.body.pathContent
+      // Generate certificates
+      WIKI.logger.info('Generating certificates...')
+      const certs = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: {
+          type: 'pkcs1',
+          format: 'pem'
+        },
+        privateKeyEncoding: {
+          type: 'pkcs1',
+          format: 'pem',
+          cipher: 'aes-256-cbc',
+          passphrase: WIKI.config.sessionSecret
+        }
+      })
 
-      confRaw = yaml.safeDump(conf)
-      await fs.writeFileAsync(path.join(WIKI.ROOTPATH, 'config.yml'), confRaw)
-
-      // Set config
-      _.set(WIKI.config, 'defaultEditor', 'markdown')
-      _.set(WIKI.config, 'graphEndpoint', 'https://graph.requarks.io')
-      _.set(WIKI.config, 'lang.code', 'en')
-      _.set(WIKI.config, 'lang.autoUpdate', true)
-      _.set(WIKI.config, 'lang.namespacing', false)
-      _.set(WIKI.config, 'lang.namespaces', [])
-      _.set(WIKI.config, 'paths.content', req.body.pathContent)
-      _.set(WIKI.config, 'paths.data', req.body.pathData)
-      _.set(WIKI.config, 'port', req.body.port)
-      _.set(WIKI.config, 'public', req.body.public === 'true')
-      _.set(WIKI.config, 'sessionSecret', (await crypto.randomBytesAsync(32)).toString('hex'))
-      _.set(WIKI.config, 'telemetry.isEnabled', req.body.telemetry === 'true')
-      _.set(WIKI.config, 'telemetry.clientId', WIKI.telemetry.cid)
-      _.set(WIKI.config, 'theming.theme', 'default')
-      _.set(WIKI.config, 'theming.darkMode', false)
-      _.set(WIKI.config, 'title', req.body.title)
+      _.set(WIKI.config, 'certs', {
+        jwk: pem2jwk(certs.publicKey),
+        public: certs.publicKey,
+        private: certs.privateKey
+      })
 
       // Save config to DB
       WIKI.logger.info('Persisting config to DB...')
       await WIKI.configSvc.saveToDb([
-        'defaultEditor',
+        'auth',
+        'certs',
+        'company',
+        'features',
         'graphEndpoint',
+        'host',
         'lang',
-        'public',
+        'logo',
+        'mail',
+        'seo',
         'sessionSecret',
         'telemetry',
         'theming',
+        'uploads',
         'title'
-      ])
+      ], false)
+
+      // Truncate tables (reset from previous failed install)
+      await WIKI.models.locales.query().where('code', '!=', 'x').del()
+      await WIKI.models.navigation.query().truncate()
+      switch (WIKI.config.db.type) {
+        case 'postgres':
+          await WIKI.models.knex.raw('TRUNCATE groups, users CASCADE')
+          break
+        case 'mysql':
+        case 'mariadb':
+          await WIKI.models.groups.query().where('id', '>', 0).del()
+          await WIKI.models.users.query().where('id', '>', 0).del()
+          await WIKI.models.knex.raw('ALTER TABLE `groups` AUTO_INCREMENT = 1')
+          await WIKI.models.knex.raw('ALTER TABLE `users` AUTO_INCREMENT = 1')
+          break
+        case 'mssql':
+          await WIKI.models.groups.query().del()
+          await WIKI.models.users.query().del()
+          await WIKI.models.knex.raw(`
+            IF EXISTS (SELECT * FROM sys.identity_columns WHERE OBJECT_NAME(OBJECT_ID) = 'groups' AND last_value IS NOT NULL)
+              DBCC CHECKIDENT ([groups], RESEED, 0)
+          `)
+          await WIKI.models.knex.raw(`
+            IF EXISTS (SELECT * FROM sys.identity_columns WHERE OBJECT_NAME(OBJECT_ID) = 'users' AND last_value IS NOT NULL)
+              DBCC CHECKIDENT ([users], RESEED, 0)
+          `)
+          break
+        case 'sqlite':
+          await WIKI.models.groups.query().truncate()
+          await WIKI.models.users.query().truncate()
+          break
+      }
 
       // Create default locale
       WIKI.logger.info('Installing default locale...')
-      await WIKI.db.locales.query().insert({
+      await WIKI.models.locales.query().insert({
         code: 'en',
-        strings: require('./locales/default.json'),
+        strings: {},
         isRTL: false,
         name: 'English',
         nativeName: 'English'
       })
 
-      // Load authentication strategies + enable local
-      await WIKI.db.authentication.refreshStrategiesFromDisk()
-      await WIKI.db.authentication.query().patch({ isEnabled: true }).where('key', 'local')
+      // Create default groups
+
+      WIKI.logger.info('Creating default groups...')
+      const adminGroup = await WIKI.models.groups.query().insert({
+        name: 'Administrators',
+        permissions: JSON.stringify(['manage:system']),
+        pageRules: JSON.stringify([]),
+        isSystem: true
+      })
+      const guestGroup = await WIKI.models.groups.query().insert({
+        name: 'Guests',
+        permissions: JSON.stringify(['read:pages', 'read:assets', 'read:comments']),
+        pageRules: JSON.stringify([
+          { id: 'guest', roles: ['read:pages', 'read:assets', 'read:comments'], match: 'START', deny: false, path: '', locales: [] }
+        ]),
+        isSystem: true
+      })
+      if (adminGroup.id !== 1 || guestGroup.id !== 2) {
+        throw new Error('Incorrect groups auto-increment configuration! Should start at 0 and increment by 1. Contact your database administrator.')
+      }
+
+      // Load local authentication strategy
+      await WIKI.models.authentication.query().insert({
+        key: 'local',
+        config: {},
+        selfRegistration: false,
+        domainWhitelist: {v: []},
+        autoEnrollGroups: {v: []},
+        order: 0,
+        strategyKey: 'local',
+        displayName: 'Local'
+      })
 
       // Load editors + enable default
-      await WIKI.db.editors.refreshEditorsFromDisk()
-      await WIKI.db.editors.query().patch({ isEnabled: true }).where('key', 'markdown')
+      await WIKI.models.editors.refreshEditorsFromDisk()
+      await WIKI.models.editors.query().patch({ isEnabled: true }).where('key', 'markdown')
+
+      // Load loggers
+      await WIKI.models.loggers.refreshLoggersFromDisk()
+
+      // Load renderers
+      await WIKI.models.renderers.refreshRenderersFromDisk()
+
+      // Load search engines + enable default
+      await WIKI.models.searchEngines.refreshSearchEnginesFromDisk()
+      await WIKI.models.searchEngines.query().patch({ isEnabled: true }).where('key', 'db')
+
+      // WIKI.telemetry.sendEvent('setup', 'install-loadedmodules')
 
       // Load storage targets
-      await WIKI.db.storage.refreshTargetsFromDisk()
+      await WIKI.models.storage.refreshTargetsFromDisk()
 
       // Create root administrator
       WIKI.logger.info('Creating root administrator...')
-      await WIKI.db.users.query().delete().where({
-        provider: 'local',
-        email: req.body.adminEmail
-      })
-      await WIKI.db.users.query().insert({
+      const adminUser = await WIKI.models.users.query().insert({
         email: req.body.adminEmail,
         provider: 'local',
         password: req.body.adminPassword,
         name: 'Administrator',
-        role: 'admin',
         locale: 'en',
         defaultEditor: 'markdown',
-        tfaIsActive: false
+        tfaIsActive: false,
+        isActive: true,
+        isVerified: true
       })
+      await adminUser.$relatedQuery('groups').relate(adminGroup.id)
 
       // Create Guest account
       WIKI.logger.info('Creating guest account...')
-      const guestUsr = await WIKI.db.users.query().findOne({
+      const guestUser = await WIKI.models.users.query().insert({
         provider: 'local',
-        email: 'guest@example.com'
+        email: 'guest@example.com',
+        name: 'Guest',
+        password: '',
+        locale: 'en',
+        defaultEditor: 'markdown',
+        tfaIsActive: false,
+        isSystem: true,
+        isActive: true,
+        isVerified: true
       })
-      if (!guestUsr) {
-        await WIKI.db.users.query().insert({
-          provider: 'local',
-          email: 'guest@example.com',
-          name: 'Guest',
-          password: '',
-          role: 'guest',
-          locale: 'en',
-          defaultEditor: 'markdown',
-          tfaIsActive: false
-        })
+      await guestUser.$relatedQuery('groups').relate(guestGroup.id)
+      if (adminUser.id !== 1 || guestUser.id !== 2) {
+        throw new Error('Incorrect users auto-increment configuration! Should start at 0 and increment by 1. Contact your database administrator.')
       }
 
+      // Create site nav
+
+      WIKI.logger.info('Creating default site navigation')
+      await WIKI.models.navigation.query().insert({
+        key: 'site',
+        config: [
+          {
+            locale: 'en',
+            items: [
+              {
+                id: uuid(),
+                icon: 'mdi-home',
+                kind: 'link',
+                label: 'Home',
+                target: '/',
+                targetType: 'home',
+                visibilityMode: 'all',
+                visibilityGroups: null
+              }
+            ]
+          }
+        ]
+      })
+
       WIKI.logger.info('Setup is complete!')
+      // WIKI.telemetry.sendEvent('setup', 'install-completed')
       res.json({
         ok: true,
-        redirectPath: WIKI.config.site.path,
+        redirectPath: '/',
         redirectPort: WIKI.config.port
       }).end()
+
+      if (WIKI.config.telemetry.isEnabled) {
+        await WIKI.telemetry.sendInstanceEvent('INSTALL')
+      }
 
       WIKI.config.setup = false
 
@@ -375,6 +364,10 @@ module.exports = () => {
         }, 1000)
       })
     } catch (err) {
+      try {
+        await WIKI.models.knex('settings').truncate()
+      } catch (err) {}
+      WIKI.telemetry.sendError(err)
       res.json({ ok: false, error: err.message })
     }
   })
@@ -403,11 +396,13 @@ module.exports = () => {
   // Start HTTP server
   // ----------------------------------------
 
-  WIKI.logger.info(`HTTP Server on port: [ ${WIKI.config.port} ]`)
+  WIKI.logger.info(`Starting HTTP server on port ${WIKI.config.port}...`)
 
   app.set('port', WIKI.config.port)
+
+  WIKI.logger.info(`HTTP Server on port: [ ${WIKI.config.port} ]`)
   WIKI.server = http.createServer(app)
-  WIKI.server.listen(WIKI.config.port)
+  WIKI.server.listen(WIKI.config.port, WIKI.config.bindIP)
 
   var openConnections = []
 
@@ -415,7 +410,7 @@ module.exports = () => {
     let key = conn.remoteAddress + ':' + conn.remotePort
     openConnections[key] = conn
     conn.on('close', () => {
-      delete openConnections[key]
+      openConnections.splice(key, 1)
     })
   })
 
@@ -445,5 +440,10 @@ module.exports = () => {
 
   WIKI.server.on('listening', () => {
     WIKI.logger.info('HTTP Server: [ RUNNING ]')
+    WIKI.logger.info('🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻🔻')
+    WIKI.logger.info('')
+    WIKI.logger.info(`Browse to http://localhost:${WIKI.config.port}/ to complete setup!`)
+    WIKI.logger.info('')
+    WIKI.logger.info('🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺🔺')
   })
 }

@@ -1,11 +1,14 @@
 query {
   authentication {
-    strategies(orderBy: "title ASC") {
+    strategies {
       isEnabled
       key
-      props
       title
+      description
+      isAvailable
       useForm
+      logo
+      website
       config {
         key
         value

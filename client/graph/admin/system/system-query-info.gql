@@ -2,22 +2,20 @@ query {
   system {
     info {
       configFile
+      cpuCores
       currentVersion
+      dbHost
       dbType
       dbVersion
-      dbHost
+      hostname
       latestVersion
       latestVersionReleaseDate
-      operatingSystem
-      hostname
-      cpuCores
-      ramTotal
-      workingDirectory
       nodeVersion
-      redisVersion
-      redisUsedRAM
-      redisTotalRAM
-      redisHost
+      operatingSystem
+      platform
+      ramTotal
+      upgradeCapable
+      workingDirectory
     }
   }
 }

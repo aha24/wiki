@@ -1,174 +1,173 @@
 <template lang='pug'>
-  v-card
-    v-card(flat, :color='$vuetify.dark ? "grey darken-4" : "grey lighten-5"').pa-3.pt-4
-      .headline.blue--text.text--darken-2 Edit Group
-      .subheading.grey--text {{name}}
-      v-btn(color='primary', fab, absolute, bottom, right, small, to='/groups'): v-icon arrow_upward
-    v-tabs(v-model='tab', :color='$vuetify.dark ? "primary" : "grey lighten-4"', fixed-tabs, :slider-color='$vuetify.dark ? "white" : "primary"', show-arrows)
-      v-tab(key='properties') Properties
-      v-tab(key='rights') Permissions
-      v-tab(key='users') Users
+  v-container(fluid, grid-list-lg)
+    v-layout(row wrap)
+      v-flex(xs12)
+        .admin-header
+          img(src='/_assets/svg/icon-social-group.svg', alt='Edit Group', style='width: 80px;')
+          .admin-header-title
+            .headline.blue--text.text--darken-2 Edit Group
+            .subtitle-1.grey--text {{group.name}}
+          v-spacer
+          v-btn(color='grey', icon, outlined, to='/groups')
+            v-icon mdi-arrow-left
+          v-dialog(v-model='deleteGroupDialog', max-width='500', v-if='!group.isSystem')
+            template(v-slot:activator='{ on }')
+              v-btn.ml-3(color='red', icon, outlined, v-on='on')
+                v-icon(color='red') mdi-trash-can-outline
+            v-card
+              .dialog-header.is-red Delete Group?
+              v-card-text.pa-4 Are you sure you want to delete group #[strong {{ group.name }}]? All users will be unassigned from this group.
+              v-card-actions
+                v-spacer
+                v-btn(text, @click='deleteGroupDialog = false') Cancel
+                v-btn(color='red', dark, @click='deleteGroup') Delete
+          v-btn.ml-3(color='success', large, depressed, @click='updateGroup')
+            v-icon(left) mdi-check
+            span Update Group
+        v-card.mt-3
+          v-tabs.grad-tabs(v-model='tab', :color='$vuetify.theme.dark ? `blue` : `primary`', fixed-tabs, show-arrows, icons-and-text)
+            v-tab(key='settings')
+              span Settings
+              v-icon mdi-cog-box
+            v-tab(key='permissions')
+              span Permissions
+              v-icon mdi-lock-pattern
+            v-tab(key='rules')
+              span Page Rules
+              v-icon mdi-file-lock
+            v-tab(key='users')
+              span Users
+              v-icon mdi-account-group
 
-      v-tab-item(key='properties', :transition='false', :reverse-transition='false')
-        v-card
-          v-card-text
-            v-text-field(v-model='name', label='Group Name', counter='255', prepend-icon='people')
-          v-card-actions.pa-3
-            v-btn(color='primary', @click='updateGroup')
-              v-icon(left) check
-              | Save Changes
-            .caption.ml-4.grey--text ID: {{group.id}}
+            v-tab-item(key='settings', :transition='false', :reverse-transition='false')
+              v-card(flat)
+                template(v-if='group.id <= 2')
+                  v-card-text
+                    v-alert.radius-7.mb-0(
+                      color='orange darken-2'
+                      :class='$vuetify.theme.dark ? "grey darken-4" : "orange lighten-5"'
+                      outlined
+                      :value='true'
+                      icon='mdi-lock-outline'
+                      ) This is a system group and its settings cannot be modified.
+                  v-divider
+                v-card-text
+                  v-text-field(
+                    outlined
+                    v-model='group.name'
+                    label='Group Name'
+                    hide-details
+                    prepend-icon='mdi-account-group'
+                    style='max-width: 600px;'
+                    :disabled='group.id <= 2'
+                  )
+                template(v-if='group.id !== 2')
+                  v-divider
+                  v-card-text
+                    v-text-field(
+                      outlined
+                      v-model='group.redirectOnLogin'
+                      label='Redirect on Login'
+                      persistent-hint
+                      hint='The path / URL where the user will be redirected upon successful login.'
+                      prepend-icon='mdi-arrow-top-left-thick'
+                      append-icon='mdi-folder-search'
+                      @click:append='selectPage'
+                      style='max-width: 850px;'
+                      :counter='255'
+                    )
+
+            v-tab-item(key='permissions', :transition='false', :reverse-transition='false')
+              group-permissions(v-model='group', @refresh='refresh')
+
+            v-tab-item(key='rules', :transition='false', :reverse-transition='false')
+              group-rules(v-model='group', @refresh='refresh')
+
+            v-tab-item(key='users', :transition='false', :reverse-transition='false')
+              group-users(v-model='group', @refresh='refresh')
+
+          v-card-chin
             v-spacer
-            v-dialog(v-model='deleteGroupDialog', max-width='500')
-              v-btn(color='red', flat, @click='', slot='activator')
-                v-icon(left) delete
-                | Delete Group
-              v-card
-                .dialog-header.is-red Delete Group?
-                v-card-text Are you sure you want to delete group #[strong {{ name }}]? All users will be unassigned from this group.
-                v-card-actions
-                  v-spacer
-                  v-btn(flat, @click='deleteGroupDialog = false') Cancel
-                  v-btn(color='red', dark, @click='deleteGroup') Delete
+            .caption.grey--text.pr-2 Group ID #[strong {{group.id}}]
 
-      v-tab-item(key='rights', :transition='false', :reverse-transition='false')
-        v-card
-          v-card-title.pb-0
-            v-subheader
-              v-icon.mr-2 border_color
-              .subheading Read and Write
-            v-spacer
-            v-btn(flat, outline)
-              v-icon(left) arrow_drop_down
-              | Load Preset
-            v-btn(flat, outline)
-              v-icon(left) vertical_align_bottom
-              | Import Rules
-          .pa-3.pl-4
-            criterias
-          v-divider.my-0
-          v-card-title.pb-0
-            v-subheader
-              v-icon.mr-2 pageview
-              .subheading Read Only
-            v-spacer
-            v-btn(flat, outline)
-              v-icon(left) arrow_drop_down
-              | Load Preset
-            v-btn(flat, outline)
-              v-icon(left) vertical_align_bottom
-              | Import Rules
-          .pa-3.pl-4
-            criterias
-          v-divider.my-0
-          v-card-title.pb-0
-            v-subheader Legend
-          .px-4.pb-4
-            .body-1.px-1.py-2 Any number of rules can be used at the same time. However, some rules requires more processing time than others. Rule types are color-coded as followed:
-            .caption
-              v-icon(color='blue') stop
-              span Fast rules. None or insignificant latency introduced to all page loads.
-            .caption
-              v-icon(color='orange') stop
-              span Medium rules. Some latency added to all page loads.
-            .caption
-              v-icon(color='red') stop
-              span Slow rules. May adds noticeable latency to all page loads. Avoid using in multiple rules.
-
-      v-tab-item(key='users', :transition='false', :reverse-transition='false')
-        v-card
-          v-card-title.pb-0
-            v-btn(color='primary', @click='searchUserDialog = true')
-              v-icon(left) assignment_ind
-              | Assign User
-          v-data-table(
-            :items='group.users',
-            :headers='headers',
-            :search='search',
-            :pagination.sync='pagination',
-            :rows-per-page-items='[15]'
-            hide-actions
-          )
-            template(slot='items', slot-scope='props')
-              tr(:active='props.selected')
-                td.text-xs-right {{ props.item.id }}
-                td {{ props.item.name }}
-                td {{ props.item.email }}
-                td
-                  v-menu(bottom, right, min-width='200')
-                    v-btn(icon, slot='activator'): v-icon.grey--text.text--darken-1 more_horiz
-                    v-list
-                      v-list-tile(@click='unassignUser(props.item.id)')
-                        v-list-tile-action: v-icon(color='orange') highlight_off
-                        v-list-tile-content
-                          v-list-tile-title Unassign
-            template(slot='no-data')
-              v-alert.ma-3(icon='warning', :value='true', outline) No users to display.
-          .text-xs-center.py-2(v-if='users.length > 15')
-            v-pagination(v-model='pagination.page', :length='pages')
-
-    user-search(v-model='searchUserDialog', @select='assignUser')
+    page-selector(mode='select', v-model='selectPageModal', :open-handler='selectPageHandle', path='home', :locale='currentLang')
 </template>
 
 <script>
-import Criterias from '../common/criterias.vue'
-import UserSearch from '../common/user-search.vue'
+import _ from 'lodash'
+import gql from 'graphql-tag'
 
-import groupQuery from 'gql/admin/groups/groups-query-single.gql'
-import assignUserMutation from 'gql/admin/groups/groups-mutation-assign.gql'
-import deleteGroupMutation from 'gql/admin/groups/groups-mutation-delete.gql'
-import unassignUserMutation from 'gql/admin/groups/groups-mutation-unassign.gql'
-import updateGroupMutation from 'gql/admin/groups/groups-mutation-update.gql'
+import GroupPermissions from './admin-groups-edit-permissions.vue'
+import GroupRules from './admin-groups-edit-rules.vue'
+import GroupUsers from './admin-groups-edit-users.vue'
+
+/* global siteConfig */
 
 export default {
   components: {
-    Criterias,
-    UserSearch
+    GroupPermissions,
+    GroupRules,
+    GroupUsers
   },
   data() {
     return {
       group: {
         id: 0,
         name: '',
-        users: []
+        isSystem: false,
+        permissions: [],
+        pageRules: [],
+        users: [],
+        redirectOnLogin: '/'
       },
-      name: '',
       deleteGroupDialog: false,
-      searchUserDialog: false,
-      pagination: {},
-      users: [],
-      headers: [
-        { text: 'ID', value: 'id', width: 50, align: 'right' },
-        { text: 'Name', value: 'name' },
-        { text: 'Email', value: 'email' },
-        { text: '', value: 'actions', sortable: false, width: 50 }
-      ],
-      search: '',
-      tab: '1'
-    }
-  },
-  computed: {
-    pages () {
-      if (this.pagination.rowsPerPage == null || this.pagination.totalItems == null) {
-        return 0
-      }
-
-      return Math.ceil(this.pagination.totalItems / this.pagination.rowsPerPage)
-    }
-  },
-  watch: {
-    group(newValue, oldValue) {
-      this.name = newValue.name
+      tab: null,
+      selectPageModal: false,
+      currentLang: siteConfig.lang
     }
   },
   methods: {
+    selectPage () {
+      this.selectPageModal = true
+    },
+    selectPageHandle ({ path, locale }) {
+      this.group.redirectOnLogin = `/${locale}/${path}`
+    },
     async updateGroup() {
       try {
         await this.$apollo.mutate({
-          mutation: updateGroupMutation,
+          mutation: gql`
+            mutation (
+              $id: Int!
+              $name: String!
+              $redirectOnLogin: String!
+              $permissions: [String]!
+              $pageRules: [PageRuleInput]!
+            ) {
+              groups {
+                update(
+                  id: $id
+                  name: $name
+                  redirectOnLogin: $redirectOnLogin
+                  permissions: $permissions
+                  pageRules: $pageRules
+                ) {
+                  responseResult {
+                    succeeded
+                    errorCode
+                    slug
+                    message
+                  }
+                }
+              }
+            }
+          `,
           variables: {
             id: this.group.id,
-            name: this.name
+            name: this.group.name,
+            redirectOnLogin: this.group.redirectOnLogin,
+            permissions: this.group.permissions,
+            pageRules: this.group.pageRules
           },
           watchLoading (isLoading) {
             this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-groups-update')
@@ -180,18 +179,27 @@ export default {
           icon: 'check'
         })
       } catch (err) {
-        this.$store.commit('showNotification', {
-          style: 'red',
-          message: err.message,
-          icon: 'warning'
-        })
+        this.$store.commit('pushGraphError', err)
       }
     },
     async deleteGroup() {
       this.deleteGroupDialog = false
       try {
         await this.$apollo.mutate({
-          mutation: deleteGroupMutation,
+          mutation: gql`
+            mutation ($id: Int!) {
+              groups {
+                delete(id: $id) {
+                  responseResult {
+                    succeeded
+                    errorCode
+                    slug
+                    message
+                  }
+                }
+              }
+            }
+          `,
           variables: {
             id: this.group.id
           },
@@ -206,76 +214,50 @@ export default {
         })
         this.$router.replace('/groups')
       } catch (err) {
-        this.$store.commit('showNotification', {
-          style: 'red',
-          message: err.message,
-          icon: 'warning'
-        })
+        this.$store.commit('pushGraphError', err)
       }
     },
-    async assignUser(id) {
-      try {
-        await this.$apollo.mutate({
-          mutation: assignUserMutation,
-          variables: {
-            groupId: this.group.id,
-            userId: id
-          },
-          watchLoading (isLoading) {
-            this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-groups-assign')
-          }
-        })
-        this.$store.commit('showNotification', {
-          style: 'success',
-          message: `User has been assigned to ${this.group.name}.`,
-          icon: 'assignment_ind'
-        })
-        this.$apollo.queries.group.refetch()
-      } catch (err) {
-        this.$store.commit('showNotification', {
-          style: 'red',
-          message: err.message,
-          icon: 'warning'
-        })
-      }
-    },
-    async unassignUser(id) {
-      try {
-        await this.$apollo.mutate({
-          mutation: unassignUserMutation,
-          variables: {
-            groupId: this.group.id,
-            userId: id
-          },
-          watchLoading (isLoading) {
-            this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-groups-unassign')
-          }
-        })
-        this.$store.commit('showNotification', {
-          style: 'success',
-          message: `User has been unassigned from ${this.group.name}.`,
-          icon: 'assignment_ind'
-        })
-        this.$apollo.queries.group.refetch()
-      } catch (err) {
-        this.$store.commit('showNotification', {
-          style: 'red',
-          message: err.message,
-          icon: 'warning'
-        })
-      }
+    async refresh() {
+      return this.$apollo.queries.group.refetch()
     }
   },
   apollo: {
     group: {
-      query: groupQuery,
+      query: gql`
+        query ($id: Int!) {
+          groups {
+            single(id: $id) {
+              id
+              name
+              redirectOnLogin
+              isSystem
+              permissions
+              pageRules {
+                id
+                path
+                roles
+                match
+                deny
+                locales
+              }
+              users {
+                id
+                name
+                email
+              }
+              createdAt
+              updatedAt
+            }
+          }
+        }
+      `,
       variables() {
         return {
-          id: this.$route.params.id
+          id: _.toSafeInteger(this.$route.params.id)
         }
       },
       fetchPolicy: 'network-only',
-      update: (data) => data.groups.single,
+      update: (data) => _.cloneDeep(data.groups.single),
       watchLoading (isLoading) {
         this.$store.commit(`loading${isLoading ? 'Start' : 'Stop'}`, 'admin-groups-refresh')
       }
